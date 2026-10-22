@@ -85,28 +85,32 @@ class TurbineTelemetry(BaseModel):
     feeder: str
     web_id: str
     timestamp: str
-    active_power_kw: float
-    wind_speed_mps: float
-    rotor_rpm: float
-    nacelle_yaw_deg: float
-    gearbox_bearing_temp_c: float
-    generator_winding_temp_c: float
-    pitch_angle_deg: float
-    expected_power_kw: float
-    power_loss_delta_kw: float
-    status: Literal["NORMAL", "WARNING", "TRIP", "CURTAILED"]
+    active_power_kw: Optional[float] = None
+    wind_speed_mps: Optional[float] = None
+    rotor_rpm: Optional[float] = None
+    nacelle_yaw_deg: Optional[float] = None
+    gearbox_bearing_temp_c: Optional[float] = None
+    generator_winding_temp_c: Optional[float] = None
+    pitch_angle_deg: Optional[float] = None
+    expected_power_kw: Optional[float] = None
+    power_loss_delta_kw: Optional[float] = None
+    status: Literal["NORMAL", "WARNING", "TRIP", "CURTAILED", "UNAVAILABLE"] = "NORMAL"
     quality_good: bool = True
     is_simulated: bool = True
+    field_quality: Dict[str, str] = Field(default_factory=dict, description="Per-field quality status: GOOD, QUESTIONABLE, BAD, UNAVAILABLE")
+    field_units: Dict[str, str] = Field(default_factory=dict, description="Engineering units per measurement")
+    field_timestamps: Dict[str, str] = Field(default_factory=dict, description="Source measurement timestamps from Data Archive")
 
 class FleetSummary(BaseModel):
     timestamp: str
-    total_active_power_mw: float
-    average_wind_speed_mps: float
-    capacity_factor_pct: float
+    total_active_power_mw: Optional[float] = None
+    average_wind_speed_mps: Optional[float] = None
+    capacity_factor_pct: Optional[float] = None
     turbines_online: int
     active_event_frames_count: int
     run_mode: str
     is_simulated: bool
+    data_coverage_pct: float = Field(default=100.0, description="Percentage of fleet turbines with valid active power telemetry")
 
 class EventFrameRecord(BaseModel):
     id: str

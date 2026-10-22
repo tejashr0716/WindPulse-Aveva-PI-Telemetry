@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 import httpx
 import websockets
 
@@ -22,16 +23,104 @@ def get_git_commit_sha():
     except Exception:
         return "UNKNOWN"
 
+def validate_subscriber_sequences(
+    client_sequences: List[List[Any]],
+    min_frames_per_client: int = 10
+) -> Dict[str, Any]:
+    """
+    Validates per-client sequence continuity independently.
+    Detects gaps, duplicates, out-of-order deliveries, invalid metadata,
+    and insufficient frame counts.
+    """
+    gaps = []
+    duplicates = []
+    out_of_order = []
+    invalid_metadata = []
+    insufficient_clients = []
+
+    for client_idx, seqs in enumerate(client_sequences):
+        if len(seqs) < min_frames_per_client:
+            insufficient_clients.append({
+                "client_idx": client_idx,
+                "received_count": len(seqs),
+                "expected_min": min_frames_per_client
+            })
+
+        for i, s in enumerate(seqs):
+            if s is None or not isinstance(s, int):
+                invalid_metadata.append({
+                    "client_idx": client_idx,
+                    "frame_index": i,
+                    "sequence_value": s
+                })
+
+        for j in range(len(seqs) - 1):
+            curr = seqs[j]
+            next_seq = seqs[j + 1]
+            if not isinstance(curr, int) or not isinstance(next_seq, int):
+                continue
+            if next_seq == curr:
+                duplicates.append({
+                    "client_idx": client_idx,
+                    "position": j + 1,
+                    "duplicate_seq": next_seq
+                })
+            elif next_seq < curr:
+                out_of_order.append({
+                    "client_idx": client_idx,
+                    "position": j + 1,
+                    "prev_seq": curr,
+                    "curr_seq": next_seq
+                })
+            elif next_seq > curr + 1:
+                gaps.append({
+                    "client_idx": client_idx,
+                    "position": j + 1,
+                    "expected_seq": curr + 1,
+                    "received_seq": next_seq,
+                    "gap_size": next_seq - (curr + 1)
+                })
+
+    is_complete = (
+        len(gaps) == 0
+        and len(duplicates) == 0
+        and len(out_of_order) == 0
+        and len(invalid_metadata) == 0
+        and len(insufficient_clients) == 0
+        and len(client_sequences) > 0
+    )
+
+    return {
+        "is_complete": is_complete,
+        "total_gaps": len(gaps),
+        "total_duplicates": len(duplicates),
+        "total_out_of_order": len(out_of_order),
+        "total_invalid_metadata": len(invalid_metadata),
+        "insufficient_clients_count": len(insufficient_clients),
+        "details": {
+            "gaps": gaps,
+            "duplicates": duplicates,
+            "out_of_order": out_of_order,
+            "invalid_metadata": invalid_metadata,
+            "insufficient_clients": insufficient_clients
+        }
+    }
+
 async def benchmark_websocket_telemetry(
     ws_url: str = "ws://127.0.0.1:8001/ws/telemetry",
     client_count: int = 20,
-    duration_seconds: float = 5.0
+    duration_seconds: float = 5.0,
+    min_frames_per_client: Optional[int] = None
 ):
-    print(f"[*] Connecting {client_count} actual network WebSocket clients to {ws_url}...")
+    if min_frames_per_client is None:
+        min_frames_per_client = max(1, int(duration_seconds * 2))
+
+    print(f"[*] Connecting {client_count} actual network WebSocket clients to {ws_url} (min_frames={min_frames_per_client})...")
 
     inter_frame_intervals = []
     initial_snapshots_received = 0
-    stream_frames_by_client = [[] for _ in range(client_count)]
+    raw_per_client_sequences = [[] for _ in range(client_count)]
+    raw_per_client_arrival_ts = [[] for _ in range(client_count)]
     errors = 0
 
     async def client_worker(idx: int):
@@ -45,23 +134,28 @@ async def benchmark_websocket_telemetry(
                     initial_snapshots_received += 1
 
                 # 2. Receive periodic stream frames and track arrival intervals & producer sequence IDs
-                last_time = time.perf_counter()
+                last_stream_frame_time = None
                 end_time = time.time() + duration_seconds
                 while time.time() < end_time:
                     try:
                         raw_msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
                         now = time.perf_counter()
-                        delta_ms = (now - last_time) * 1000.0
-                        last_time = now
 
                         msg = json.loads(raw_msg)
                         seq = msg.get("frame_seq")
-                        if seq is not None and seq > 0:
-                            stream_frames_by_client[idx].append(seq)
+
+                        raw_per_client_sequences[idx].append(seq)
+                        raw_per_client_arrival_ts[idx].append(round(now, 6))
+
+                        # Exclude initial snapshot from inter-frame arrival intervals:
+                        # only measure interval starting from the first stream frame
+                        if last_stream_frame_time is not None:
+                            delta_ms = (now - last_stream_frame_time) * 1000.0
                             inter_frame_intervals.append(delta_ms)
+                        last_stream_frame_time = now
                     except asyncio.TimeoutError:
                         break
-        except Exception as e:
+        except Exception:
             errors += 1
 
     t0 = time.perf_counter()
@@ -69,7 +163,7 @@ async def benchmark_websocket_telemetry(
     await asyncio.gather(*tasks)
     total_elapsed = time.perf_counter() - t0
 
-    total_stream_frames = sum(len(seqs) for seqs in stream_frames_by_client)
+    total_stream_frames = sum(len(seqs) for seqs in raw_per_client_sequences)
     throughput = total_stream_frames / total_elapsed if total_elapsed > 0 else 0.0
 
     sorted_intervals = sorted(inter_frame_intervals) if inter_frame_intervals else [0.0]
@@ -77,10 +171,17 @@ async def benchmark_websocket_telemetry(
     p95 = sorted_intervals[int(len(sorted_intervals) * 0.95)]
     p99 = sorted_intervals[int(len(sorted_intervals) * 0.99)]
 
-    # Assert completeness: zero connection dropouts and all subscribers received stream frames
-    assert errors == 0, f"Connection failures detected: {errors}"
-    assert initial_snapshots_received == client_count, f"Snapshot mismatch: {initial_snapshots_received} != {client_count}"
-    assert total_stream_frames > 0, "No stream frames received"
+    validation_result = validate_subscriber_sequences(
+        raw_per_client_sequences,
+        min_frames_per_client=min_frames_per_client
+    )
+
+    is_complete = (
+        validation_result["is_complete"]
+        and (errors == 0)
+        and (initial_snapshots_received == client_count)
+        and (total_stream_frames > 0)
+    )
 
     return {
         "benchmark_type": "WEBSOCKET_NETWORK_TELEMETRY",
@@ -91,7 +192,8 @@ async def benchmark_websocket_telemetry(
         "total_stream_frames_delivered": total_stream_frames,
         "connection_errors": errors,
         "throughput_stream_frames_per_sec": round(throughput, 1),
-        "application_message_completeness": True,
+        "application_message_completeness": is_complete,
+        "completeness_validation": validation_result,
         "inter_frame_arrival_interval_ms": {
             "p50": round(p50, 3),
             "p95": round(p95, 3),
@@ -100,7 +202,9 @@ async def benchmark_websocket_telemetry(
             "max": round(sorted_intervals[-1], 3)
         },
         "raw_samples": {
-            "inter_frame_intervals_ms": [round(x, 4) for x in inter_frame_intervals]
+            "inter_frame_intervals_ms": [round(x, 4) for x in inter_frame_intervals],
+            "raw_per_client_sequences": raw_per_client_sequences,
+            "raw_per_client_arrival_ts": raw_per_client_arrival_ts
         }
     }
 
@@ -230,8 +334,22 @@ async def main():
     print(f"CSV Evidence  : {csv_path}")
     print(f"WebSocket Arrival Interval P50/P95/P99 : {ws_results['inter_frame_arrival_interval_ms']['p50']}ms / {ws_results['inter_frame_arrival_interval_ms']['p95']}ms / {ws_results['inter_frame_arrival_interval_ms']['p99']}ms")
     print(f"WebSocket Stream Frames Delivered      : {ws_results['total_stream_frames_delivered']} frames across {ws_results['client_connections']} subscribers")
+    print(f"Application Message Completeness       : {ws_results['application_message_completeness']}")
     print(f"HTTP REST Round-Trip P50/P95/P99      : {http_results['round_trip_latency_ms']['p50']}ms / {http_results['round_trip_latency_ms']['p95']}ms / {http_results['round_trip_latency_ms']['p99']}ms")
     print("=" * 80)
+
+    if not ws_results.get("application_message_completeness", False):
+        print("\n❌ BENCHMARK FAILED: application_message_completeness is False!")
+        print(f"Validation details: {ws_results.get('completeness_validation')}")
+        sys.exit(1)
+
+    if ws_results.get("connection_errors", 0) > 0:
+        print(f"\n❌ BENCHMARK FAILED: {ws_results['connection_errors']} connection errors detected!")
+        sys.exit(1)
+
+    if http_results.get("failed_responses", 0) > 0:
+        print(f"\n❌ BENCHMARK FAILED: {http_results['failed_responses']} HTTP failures detected!")
+        sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())

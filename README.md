@@ -2,7 +2,7 @@
 
 [![PI Web API Architecture](https://img.shields.io/badge/AVEVA-PI%20Web%20API%20Gateway-orange?style=flat-square)](https://docs.aveva.com)
 [![FastAPI Telemetry](https://img.shields.io/badge/FastAPI-Async%20Telemetry-emerald?style=flat-square)](https://fastapi.tiangolo.com)
-[![Pytest Suite](https://img.shields.io/badge/Tests-30%20Passed%20%7C%202%20Skipped-success?style=flat-square)](file:///Users/tejashr/live-projects/WindPulse-Aveva-PI-Telemetry/tests)
+[![Pytest Suite](https://img.shields.io/badge/Tests-47%20Passed%20%7C%202%20Skipped-success?style=flat-square)](file:///Users/tejashr/live-projects/WindPulse-Aveva-PI-Telemetry/tests)
 [![Live UI Prototype](https://img.shields.io/badge/Live%20Prototype-GitHub%20Pages-blue?style=flat-square)](https://tejashr0716.github.io/windpulse/)
 
 > **Industrial Telemetry & SCADA Gateway Prototype**  
@@ -86,35 +86,35 @@ Writing setpoints or overrides to industrial PI Points can disrupt plant operati
 All benchmarks were run locally against the live FastAPI Uvicorn server (`http://127.0.0.1:8001`). Raw output artifacts are version-controlled in [`benchmarks/results/`](benchmarks/results/).
 
 ### 1. Network WebSocket Frame Delivery & Sequence Completeness
-- **Script:** `python benchmarks/benchmark_simulation.py`
+- **Script:** `python3 benchmarks/benchmark_simulation.py`
 - **Clients:** 20 concurrent network WebSocket connections (using the `websockets` library over real TCP sockets)
 - **Duration:** 5.0 seconds
-- **Initial Connection Snapshots:** 20 / 20 delivered cleanly upon connect
-- **Total Stream Frames Delivered:** 1,000 frames (50 ticks $\times$ 20 clients)
-- **Application-Message Completeness:** 100% (zero missing frame sequence IDs, zero connection dropouts)
+- **Initial Connection Snapshots:** 20 / 20 delivered cleanly upon connect (strictly excluded from arrival interval calculations)
+- **Total Stream Frames Delivered:** 980 frames
+- **Application-Message Completeness:** `True` (verified via `validate_subscriber_sequences()`: 0 sequence gaps, 0 duplicates, 0 out-of-order deliveries across all 20 subscriber channels)
 - **Inter-Frame Arrival Interval:**
-  - **P50:** 102.84 ms
-  - **P95:** 104.43 ms
-  - **P99:** 104.73 ms
-  - **Throughput:** 199.7 stream frames/sec (10Hz broadcast rate)
+  - **P50:** 104.1 ms
+  - **P95:** 107.4 ms
+  - **P99:** 108.6 ms
+  - **Throughput:** 196.0 stream frames/sec (10Hz broadcast rate across 20 subscribers)
 
 ### 2. HTTP REST Fleet Snapshot Query
 - **Requests:** 200 requests (concurrency: 10)
 - **Endpoint:** `GET /api/telemetry/snapshot`
 - **Successful Responses:** 200 / 200 (100% success rate)
-- **Throughput:** 445.6 requests/sec
+- **Throughput:** ~420 requests/sec
 - **Round-Trip Latency:**
-  - **P50:** 16.34 ms
-  - **P95:** 31.92 ms
-  - **P99:** 37.06 ms
+  - **P50:** 13.3 ms
+  - **P95:** 34.5 ms
+  - **P99:** 63.9 ms
 
 ### 3. Real PI Web API Round-Trip Latency
 - **Result:** `NOT MEASURED — NO LICENSED PI INFRASTRUCTURE CONFIGURED`
 - *Note:* Real PI Web API response times depend on network routing, PI Data Archive indexing, and Kerberos/Basic authentication overhead. WindPulse does not extrapolate or fabricate real PI latencies.
 
 **Raw Evidence Files:**
-- JSON: [`benchmarks/results/windpulse_benchmark_1792690503.json`](benchmarks/results/windpulse_benchmark_1792690503.json)
-- CSV: [`benchmarks/results/windpulse_benchmark_1792690503.csv`](benchmarks/results/windpulse_benchmark_1792690503.csv)
+- JSON: [`benchmarks/results/windpulse_benchmark_1792693208.json`](benchmarks/results/windpulse_benchmark_1792693208.json)
+- CSV: [`benchmarks/results/windpulse_benchmark_1792693208.csv`](benchmarks/results/windpulse_benchmark_1792693208.csv)
 
 ---
 
@@ -134,7 +134,7 @@ pip install -r requirements.txt
 ```bash
 pytest -v
 ```
-*Expected Result:* `30 passed, 2 skipped in ~0.10s` (Real PI tests skipped due to absent enterprise credentials).
+*Expected Result:* `47 passed, 2 skipped in ~0.35s` (Real PI tests skipped due to absent enterprise credentials).
 
 ### 3. Run FastAPI Telemetry Server
 ```bash
