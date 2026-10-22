@@ -93,3 +93,33 @@ async def test_write_divergence_flagged():
             result = await client.write_point_value(target_web_id, 98.75)
             assert result.verified is False
             assert "read-back verification diverged" in result.message
+
+@pytest.mark.asyncio
+async def test_write_read_back_flagged_unverified_if_quality_questionable_or_bad():
+    """
+    Regression Test for Audit Issue E.2:
+    If read-back matches numerically but Questionable=True or Good=False, verified must be False.
+    """
+    target_web_id = "APPROVED_TEST_POINT_01"
+    client = AvevaPIWebApiClient(
+        base_url="https://mock-pi/piwebapi",
+        allow_writes=True,
+        approved_write_points=[target_web_id]
+    )
+
+    mock_post_resp = MagicMock()
+    mock_post_resp.status = 202
+
+    # Matches numeric value 98.75 but marked Questionable
+    mock_get_value = PIStreamValue(
+        Timestamp="2026-10-22T14:35:00Z",
+        Value=98.75,
+        Good=True,
+        Questionable=True
+    )
+
+    with patch.object(client, "_execute_with_retry", AsyncMock(return_value=mock_post_resp)):
+        with patch.object(client, "get_stream_value", AsyncMock(return_value=mock_get_value)):
+            result = await client.write_point_value(target_web_id, 98.75)
+            assert result.verified is False
+            assert "diverged" in result.message

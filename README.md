@@ -2,7 +2,7 @@
 
 [![PI Web API Architecture](https://img.shields.io/badge/AVEVA-PI%20Web%20API%20Gateway-orange?style=flat-square)](https://docs.aveva.com)
 [![FastAPI Telemetry](https://img.shields.io/badge/FastAPI-Async%20Telemetry-emerald?style=flat-square)](https://fastapi.tiangolo.com)
-[![Pytest Suite](https://img.shields.io/badge/Tests-25%20Passed%20%7C%202%20Skipped-success?style=flat-square)](file:///Users/tejashr/live-projects/WindPulse-Aveva-PI-Telemetry/tests)
+[![Pytest Suite](https://img.shields.io/badge/Tests-47%20Passed%20%7C%202%20Skipped-success?style=flat-square)](file:///Users/tejashr/live-projects/WindPulse-Aveva-PI-Telemetry/tests)
 [![Live UI Prototype](https://img.shields.io/badge/Live%20Prototype-GitHub%20Pages-blue?style=flat-square)](https://tejashr0716.github.io/windpulse/)
 
 > **Industrial Telemetry & SCADA Gateway Prototype**  
@@ -20,11 +20,11 @@
 
 | Feature | Implementation Mode | Verification / Test Status | Notes |
 |---|---|---|---|
-| **Physics Aerodynamic Simulation** | Implemented (`src/simulation.py`) | Tested (`tests/test_simulation.py`) | Models Betz limit ($C_p \le 0.593$), cubic power curve, cut-in ($3.0\,\text{m/s}$), cut-out ($25.0\,\text{m/s}$), yaw misalignment losses ($\cos^2\theta$), and thermal dissipation. |
-| **PI Web API Async Client** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_client_contracts.py`) | Handles Basic and Bearer auth, WebID 2.0 caching, batch StreamSets, exponential backoff retries, and strict `Good=False` quality flag validation. |
-| **Point Value Write Safety Guard** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_write_safety.py`) | Two-layer protection: disabled by default (`PI_ALLOW_WRITES=False`), requires tag whitelist matching, and performs mandatory read-back verification within tolerance. |
-| **FastAPI REST & WebSocket Hub** | Implemented (`src/main.py`) | Tested (`tests/test_api_endpoints.py`, `benchmarks/`) | 10Hz WebSocket streaming broadcast, snapshot REST queries, manual wind speed control, and emergency trip endpoints. |
-| **Real AVEVA PI Infrastructure** | Configured (`src/config.py`) | Gracefully Skipped (`tests/test_pi_real_integration.py`) | Requires authorized enterprise PI host. Marked skipped when `RUN_MODE != REAL_PI`. No fake live connections are claimed. |
+| **Physics Aerodynamic Simulation** | Implemented (`src/simulation.py`) | Tested (`tests/test_simulation.py`) | Models Betz limit ($C_p \le 0.593$), cubic power curve, cut-in ($3.0\,\text{m/s}$), cut-out ($25.0\,\text{m/s}$), yaw misalignment losses ($\cos^2\theta$), and thermal dissipation. Generates explicitly marked synthetic EventFrames. |
+| **PI Web API Async Client** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_client_contracts.py`) | Handles Basic and Bearer auth, WebID 2.0 caching, multi-tag retrieval via PI Web API Batch controller (`POST /piwebapi/batch`), exponential backoff retries, and strict data quality validation (rejects `Good=False`, `Questionable=True`, digital states, and booleans). |
+| **Point Value Write Safety Guard** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_write_safety.py`) | Two-layer protection: disabled by default (`PI_ALLOW_WRITES=False`), requires tag whitelist matching, and performs mandatory read-back verification within configurable tolerance (`PI_WRITE_VERIFY_TOLERANCE = 0.05`). |
+| **FastAPI REST & WebSocket Hub** | Implemented (`src/main.py`) | Tested (`tests/test_api_endpoints.py`, `benchmarks/`) | 10Hz WebSocket streaming broadcast with monotonic `frame_seq` counters, snapshot REST queries, manual wind speed control, emergency trip endpoints, and separate liveness/readiness health probes. |
+| **Real AVEVA PI Infrastructure** | Configured (`src/config.py`) | Gracefully Skipped (`tests/test_pi_real_integration.py`) | Requires authorized enterprise PI host. Marked skipped when `RUN_MODE != REAL_PI`. No fake live connections or synthetic fallbacks in live mode. |
 
 ---
 
@@ -41,15 +41,15 @@ flowchart TD
     subgraph Dual_Mode_Engine ["WindPulse Telemetry Service (src/main.py)"]
         direction TB
         ModeRouter{"RUN_MODE Selector"}
-        SimEngine["Simulation Engine (10Hz Local Broadcast)"]
-        PIClient["PI Web API Async Client (Batch StreamSets & Writes)"]
+        SimEngine["Simulation Engine (10Hz Local Broadcast + Sequence Tracking)"]
+        PIClient["PI Web API Async Client (Batch Controller & Guarded Writes)"]
         
         ModeRouter -->|"SIMULATION (Default)"| SimEngine
         ModeRouter -->|"REAL_PI (Configured)"| PIClient
     end
 
     subgraph AVEVA_PI ["AVEVA OSIsoft PI Infrastructure (Optional Enterprise)"]
-        PIClient -.->|"HTTPS REST / StreamSets"| PIWebAPI["AVEVA PI Web API"]
+        PIClient -.->|"HTTPS REST / Batch Controller"| PIWebAPI["AVEVA PI Web API"]
         PIWebAPI -.-> AF["PI Asset Framework (AF)"]
         PIWebAPI -.-> DA["PI Data Archive (Tags)"]
     end
@@ -66,18 +66,18 @@ flowchart TD
 ## 🛡️ PI Web API Safety & Quality Assurance
 
 ### 1. PI Data Quality Flag Validation
-In AVEVA PI, time-series streams return digital status indicators (e.g., `Scan Off`, `I/O Timeout`, `Bad Input`) with a boolean `Good: false` flag. The ingestion parser in `src/models.py` (`PIStreamValue.get_numeric_value()`) strictly rejects non-good or string digital state values:
+In AVEVA PI, time-series streams return digital status indicators (e.g., `Scan Off`, `I/O Timeout`, `Bad Input`) with a boolean `Good: false` flag or `Questionable: true` accuracy flag. The ingestion parser in `src/models.py` (`PIStreamValue.get_numeric_value()`) strictly rejects non-good, questionable, digital state dictionaries, strings, and Python booleans (avoiding the `isinstance(True, int)` trap):
 ```python
-# Returns None for non-good or digital states to prevent corrupting downstream calculations
-if not self.Good:
+# Returns None for non-good, questionable, digital states, or booleans to prevent corrupting downstream calculations
+if not self.Good or self.Questionable or isinstance(self.Value, bool) or isinstance(self.Value, dict):
     return None
 ```
 
 ### 2. Guarded Point Write Protection
 Writing setpoints or overrides to industrial PI Points can disrupt plant operations. WindPulse implements strict safeguards:
-1. **Global Killswitch:** `PI_ALLOW_WRITES` defaults to `False`. Writes raise a `PermissionError` immediately if disabled.
+1. **Global Killswitch:** `PI_ALLOW_WRITES` defaults to `False`. Writes raise a `PIWritePermissionError` immediately if disabled.
 2. **Point Whitelist:** Writes are validated against `PI_APPROVED_WRITE_POINTS`. Unregistered tags are blocked.
-3. **Read-Back Verification:** Every successful write triggers an immediate read-back query to ensure the Data Archive accepted the value within a configurable tolerance ($\pm 0.05$).
+3. **Read-Back Verification:** Every successful write triggers an immediate read-back query to ensure the Data Archive accepted the value with `Good=True`, `Questionable=False`, and numeric divergence within `PI_WRITE_VERIFY_TOLERANCE` ($\pm 0.05$).
 
 ---
 
@@ -85,35 +85,36 @@ Writing setpoints or overrides to industrial PI Points can disrupt plant operati
 
 All benchmarks were run locally against the live FastAPI Uvicorn server (`http://127.0.0.1:8001`). Raw output artifacts are version-controlled in [`benchmarks/results/`](benchmarks/results/).
 
-### 1. Network WebSocket Frame Delivery
-- **Script:** `python benchmarks/benchmark_simulation.py`
+### 1. Network WebSocket Frame Delivery & Sequence Completeness
+- **Script:** `python3 benchmarks/benchmark_simulation.py`
 - **Clients:** 20 concurrent network WebSocket connections (using the `websockets` library over real TCP sockets)
-- **Duration:** 5.1 seconds
-- **Total Frames Delivered:** 1,020 frames
-- **Connection Failures:** 0
-- **Throughput:** 200.0 frames/sec (10Hz broadcast across 20 clients)
-- **Inter-Frame Latency:**
-  - **P50:** 102.87 ms
-  - **P95:** 106.18 ms
-  - **P99:** 108.02 ms
+- **Duration:** 5.0 seconds
+- **Initial Connection Snapshots:** 20 / 20 delivered cleanly upon connect (strictly excluded from arrival interval calculations)
+- **Total Stream Frames Delivered:** 980 frames
+- **Application-Message Completeness:** `True` (verified via `validate_subscriber_sequences()`: 0 sequence gaps, 0 duplicates, 0 out-of-order deliveries across all 20 subscriber channels)
+- **Inter-Frame Arrival Interval:**
+  - **P50:** 104.1 ms
+  - **P95:** 107.4 ms
+  - **P99:** 108.6 ms
+  - **Throughput:** 196.0 stream frames/sec (10Hz broadcast rate across 20 subscribers)
 
 ### 2. HTTP REST Fleet Snapshot Query
 - **Requests:** 200 requests (concurrency: 10)
 - **Endpoint:** `GET /api/telemetry/snapshot`
-- **Successful Responses:** 200 / 200 (100%)
-- **Throughput:** 570.5 requests/sec
+- **Successful Responses:** 200 / 200 (100% success rate)
+- **Throughput:** ~420 requests/sec
 - **Round-Trip Latency:**
-  - **P50:** 13.08 ms
-  - **P95:** 30.08 ms
-  - **P99:** 79.03 ms
+  - **P50:** 13.3 ms
+  - **P95:** 34.5 ms
+  - **P99:** 63.9 ms
 
 ### 3. Real PI Web API Round-Trip Latency
 - **Result:** `NOT MEASURED — NO LICENSED PI INFRASTRUCTURE CONFIGURED`
 - *Note:* Real PI Web API response times depend on network routing, PI Data Archive indexing, and Kerberos/Basic authentication overhead. WindPulse does not extrapolate or fabricate real PI latencies.
 
 **Raw Evidence Files:**
-- JSON: [`benchmarks/results/windpulse_benchmark_1792684007.json`](benchmarks/results/windpulse_benchmark_1792684007.json)
-- CSV: [`benchmarks/results/windpulse_benchmark_1792684007.csv`](benchmarks/results/windpulse_benchmark_1792684007.csv)
+- JSON: [`benchmarks/results/windpulse_benchmark_1792693208.json`](benchmarks/results/windpulse_benchmark_1792693208.json)
+- CSV: [`benchmarks/results/windpulse_benchmark_1792693208.csv`](benchmarks/results/windpulse_benchmark_1792693208.csv)
 
 ---
 
@@ -123,7 +124,7 @@ All benchmarks were run locally against the live FastAPI Uvicorn server (`http:/
 ```bash
 git clone https://github.com/tejashr0716/WindPulse-Aveva-PI-Telemetry.git
 cd WindPulse-Aveva-PI-Telemetry
-git checkout grounded-implementation
+git checkout fix-live-pi-and-simulation-correctness
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -133,11 +134,11 @@ pip install -r requirements.txt
 ```bash
 pytest -v
 ```
-*Expected Result:* `25 passed, 2 skipped in ~0.06s` (Real PI tests skipped due to absent enterprise credentials).
+*Expected Result:* `47 passed, 2 skipped in ~0.35s` (Real PI tests skipped due to absent enterprise credentials).
 
 ### 3. Run FastAPI Telemetry Server
 ```bash
-python3 src/main.py
+python3 -m uvicorn src.main:app --host 127.0.0.1 --port 8001
 # Server starts at http://127.0.0.1:8001
 # API docs available at http://127.0.0.1:8001/docs
 ```

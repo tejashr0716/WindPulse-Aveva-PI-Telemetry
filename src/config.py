@@ -3,9 +3,25 @@ Configuration module for WindPulse telemetry system.
 Explicitly distinguishes between SIMULATION mode and REAL_PI mode.
 """
 
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+def get_default_turbine_tag_mappings() -> Dict[str, Dict[str, str]]:
+    """Default standard WebID mappings for 8 wind turbines."""
+    mappings = {}
+    for i in range(1, 9):
+        name = f"WTG-{i:02d}"
+        mappings[name] = {
+            "active_power_kw": f"F1DP_{name}_ActivePower",
+            "wind_speed_mps": f"F1DP_{name}_WindSpeed",
+            "rotor_rpm": f"F1DP_{name}_RotorRPM",
+            "nacelle_yaw_deg": f"F1DP_{name}_NacelleYaw",
+            "gearbox_bearing_temp_c": f"F1DP_{name}_GearboxTemp",
+            "generator_winding_temp_c": f"F1DP_{name}_GenTemp",
+            "pitch_angle_deg": f"F1DP_{name}_PitchAngle"
+        }
+    return mappings
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -39,6 +55,13 @@ class Settings(BaseSettings):
     PI_MAX_RETRIES: int = Field(default=3, description="Maximum bounded retries for idempotent requests")
     PI_RETRY_BACKOFF_FACTOR: float = Field(default=0.5, description="Exponential backoff factor")
 
+    # Reading Telemetry Point Mappings (REAL_PI Mode)
+    # Completely decoupled from write guards: reading telemetry NEVER requires write permission
+    PI_TURBINE_TAG_MAPPINGS: Dict[str, Dict[str, str]] = Field(
+        default_factory=get_default_turbine_tag_mappings,
+        description="Explicit mapping of turbine name -> field name -> PI Point WebID"
+    )
+
     # Safety Guards for Write Operations
     PI_ALLOW_WRITES: bool = Field(
         default=False,
@@ -47,6 +70,10 @@ class Settings(BaseSettings):
     PI_APPROVED_WRITE_POINTS: List[str] = Field(
         default_factory=list,
         description="Whitelist of specific PI Point WebIDs or tag names permitted for write testing."
+    )
+    PI_WRITE_VERIFY_TOLERANCE: float = Field(
+        default=0.05,
+        description="Permissible divergence tolerance between written value and verified read-back value."
     )
 
     # Telemetry and Simulation Parameters

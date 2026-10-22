@@ -511,12 +511,17 @@
       }
     }
 
+    function fmtNum(val, dec = 1, fallback = 'N/A') {
+      if (val === null || val === undefined || isNaN(val)) return fallback;
+      return Number(val).toFixed(dec);
+    }
+
     function handleBackendTelemetry(data) {
       if (data.summary) {
-        document.getElementById('kpi-total-power').innerText = `${data.summary.total_active_power_mw.toFixed(2)} MW`;
-        document.getElementById('kpi-avg-wind').innerText = `${data.summary.average_wind_speed_mps.toFixed(1)} m/s`;
-        document.getElementById('kpi-cap-factor').innerText = `${data.summary.capacity_factor_pct.toFixed(1)}%`;
-        document.getElementById('kpi-event-frames').innerText = `${data.summary.active_event_frames_count} Open`;
+        document.getElementById('kpi-total-power').innerText = `${fmtNum(data.summary.total_active_power_mw, 2)} MW`;
+        document.getElementById('kpi-avg-wind').innerText = `${fmtNum(data.summary.average_wind_speed_mps, 1)} m/s`;
+        document.getElementById('kpi-cap-factor').innerText = `${fmtNum(data.summary.capacity_factor_pct, 1)}%`;
+        document.getElementById('kpi-event-frames').innerText = `${data.summary.active_event_frames_count ?? 0} Open`;
       }
       if (data.turbines && data.turbines.length) {
         data.turbines.forEach((t, i) => {
@@ -527,7 +532,9 @@
             turbines[i].nacelle_yaw_deg = t.nacelle_yaw_deg;
             turbines[i].gearbox_bearing_temp_c = t.gearbox_bearing_temp_c;
             turbines[i].status = t.status;
-            turbines[i].bladeAngle = (turbines[i].bladeAngle + t.rotor_rpm * 0.4) % 360;
+            if (t.rotor_rpm !== null && t.rotor_rpm !== undefined) {
+              turbines[i].bladeAngle = (turbines[i].bladeAngle + t.rotor_rpm * 0.4) % 360;
+            }
           }
         });
         renderTurbinesGrid();
@@ -599,19 +606,19 @@
             <div class="grid grid-cols-2 gap-2 mt-3 font-mono text-xs">
               <div class="space-y-0.5">
                 <span class="text-slate-500 text-[10px]">Active Power</span>
-                <div class="font-bold text-emerald-400 text-sm">${(t.active_power_kw / 1000).toFixed(2)} MW</div>
+                <div class="font-bold text-emerald-400 text-sm">${t.active_power_kw !== null ? (t.active_power_kw / 1000).toFixed(2) + ' MW' : 'N/A'}</div>
               </div>
               <div class="space-y-0.5">
                 <span class="text-slate-500 text-[10px]">Rotor Speed</span>
-                <div class="font-bold text-cyan-300 text-sm">${t.rotor_rpm.toFixed(1)} RPM</div>
+                <div class="font-bold text-cyan-300 text-sm">${fmtNum(t.rotor_rpm, 1)} RPM</div>
               </div>
               <div class="space-y-0.5">
                 <span class="text-slate-500 text-[10px]">Wind Speed</span>
-                <div class="font-bold text-slate-200 text-sm">${t.wind_speed_mps.toFixed(1)} m/s</div>
+                <div class="font-bold text-slate-200 text-sm">${fmtNum(t.wind_speed_mps, 1)} m/s</div>
               </div>
               <div class="space-y-0.5">
                 <span class="text-slate-500 text-[10px]">Gearbox Temp</span>
-                <div class="font-bold ${t.gearbox_bearing_temp_c > 75 ? 'text-rose-400' : 'text-slate-300'} text-sm">${t.gearbox_bearing_temp_c.toFixed(0)}°C</div>
+                <div class="font-bold ${(t.gearbox_bearing_temp_c !== null && t.gearbox_bearing_temp_c > 75) ? 'text-rose-400' : 'text-slate-300'} text-sm">${fmtNum(t.gearbox_bearing_temp_c, 0)}°C</div>
               </div>
             </div>
           </div>
@@ -634,14 +641,14 @@
       document.getElementById('focus-webid').innerText = t.web_id;
 
       const gauges = [
-        { label: "Active Power", value: `${t.active_power_kw.toFixed(0)} kW`, sub: "Tag: WTG.ActivePower", color: "text-emerald-400" },
-        { label: "Wind Speed", value: `${t.wind_speed_mps.toFixed(2)} m/s`, sub: "Tag: WTG.WindSpeed", color: "text-cyan-400" },
-        { label: "Rotor Speed", value: `${t.rotor_rpm.toFixed(1)} RPM`, sub: "Tag: WTG.RotorRPM", color: "text-purple-400" },
-        { label: "Nacelle Yaw", value: `${t.nacelle_yaw_deg.toFixed(1)}°`, sub: `Yaw Diff: ${Math.abs(t.nacelle_yaw_deg - windDirection).toFixed(1)}°`, color: "text-amber-400" },
-        { label: "Gearbox Temp", value: `${t.gearbox_bearing_temp_c.toFixed(1)}°C`, sub: "Limit: 80.0°C", color: t.gearbox_bearing_temp_c > 75 ? "text-rose-400" : "text-slate-300" },
-        { label: "Generator Temp", value: `${t.generator_winding_temp_c ? t.generator_winding_temp_c.toFixed(1) : '74.0'}°C`, sub: "Limit: 95.0°C", color: "text-slate-300" },
-        { label: "Blade Pitch", value: `${t.pitch_angle_deg ? t.pitch_angle_deg.toFixed(1) : '0.0'}°`, sub: "Feathering", color: "text-slate-300" },
-        { label: "Power Loss ΔP", value: `${(t.active_power_kw * 0.04).toFixed(0)} kW`, sub: "Formula: Ideal-Actual", color: "text-rose-400" }
+        { label: "Active Power", value: `${fmtNum(t.active_power_kw, 0)} kW`, sub: "Tag: WTG.ActivePower", color: "text-emerald-400" },
+        { label: "Wind Speed", value: `${fmtNum(t.wind_speed_mps, 2)} m/s`, sub: "Tag: WTG.WindSpeed", color: "text-cyan-400" },
+        { label: "Rotor Speed", value: `${fmtNum(t.rotor_rpm, 1)} RPM`, sub: "Tag: WTG.RotorRPM", color: "text-purple-400" },
+        { label: "Nacelle Yaw", value: `${fmtNum(t.nacelle_yaw_deg, 1)}°`, sub: `Yaw Diff: ${t.nacelle_yaw_deg !== null ? Math.abs(t.nacelle_yaw_deg - windDirection).toFixed(1) + '°' : 'N/A'}`, color: "text-amber-400" },
+        { label: "Gearbox Temp", value: `${fmtNum(t.gearbox_bearing_temp_c, 1)}°C`, sub: "Limit: 80.0°C", color: (t.gearbox_bearing_temp_c !== null && t.gearbox_bearing_temp_c > 75) ? "text-rose-400" : "text-slate-300" },
+        { label: "Generator Temp", value: `${fmtNum(t.generator_winding_temp_c, 1)}°C`, sub: "Limit: 95.0°C", color: "text-slate-300" },
+        { label: "Blade Pitch", value: `${fmtNum(t.pitch_angle_deg, 1)}°`, sub: "Feathering", color: "text-slate-300" },
+        { label: "Power Loss ΔP", value: `${t.active_power_kw !== null ? (t.active_power_kw * 0.04).toFixed(0) + ' kW' : 'N/A'}`, sub: "Formula: Ideal-Actual", color: "text-rose-400" }
       ];
 
       document.getElementById('telemetry-gauges-grid').innerHTML = gauges.map(g => `
@@ -688,13 +695,13 @@
     function renderAfAttributesTable() {
       const t = turbines.find(item => item.turbine_id === selectedTurbineId) || turbines[0];
       const rows = [
-        { name: "Wind_Speed", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.WindSpeed;ptpath=true`, val: t.wind_speed_mps.toFixed(2), uom: "m/s" },
-        { name: "Active_Power", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.ActivePower;ptpath=true`, val: t.active_power_kw.toFixed(0), uom: "kW" },
-        { name: "Rotor_RPM", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.RotorRPM;ptpath=true`, val: t.rotor_rpm.toFixed(1), uom: "rpm" },
-        { name: "Nacelle_Yaw", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.NacelleYaw;ptpath=true`, val: t.nacelle_yaw_deg.toFixed(1), uom: "deg" },
-        { name: "Gearbox_Bearing_Temp", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.GearboxTemp;ptpath=true`, val: t.gearbox_bearing_temp_c.toFixed(1), uom: "°C" },
-        { name: "Expected_Power", ref: "Formula", config: `A=Wind_Speed;[0.5*1.225*11310*A^3*0.442/1000]`, val: `${(t.active_power_kw * 1.05).toFixed(0)}`, uom: "kW" },
-        { name: "Power_Loss_Delta", ref: "Formula", config: `A=Expected_Power;B=Active_Power;[A-B]`, val: `${(t.active_power_kw * 0.05).toFixed(0)}`, uom: "kW" }
+        { name: "Wind_Speed", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.WindSpeed;ptpath=true`, val: fmtNum(t.wind_speed_mps, 2), uom: "m/s" },
+        { name: "Active_Power", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.ActivePower;ptpath=true`, val: fmtNum(t.active_power_kw, 0), uom: "kW" },
+        { name: "Rotor_RPM", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.RotorRPM;ptpath=true`, val: fmtNum(t.rotor_rpm, 1), uom: "rpm" },
+        { name: "Nacelle_Yaw", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.NacelleYaw;ptpath=true`, val: fmtNum(t.nacelle_yaw_deg, 1), uom: "deg" },
+        { name: "Gearbox_Bearing_Temp", ref: "PI Point", config: `\\\\PIDA01\\${t.name}.GearboxTemp;ptpath=true`, val: fmtNum(t.gearbox_bearing_temp_c, 1), uom: "°C" },
+        { name: "Expected_Power", ref: "Formula", config: `A=Wind_Speed;[0.5*1.225*11310*A^3*0.442/1000]`, val: t.active_power_kw !== null ? `${(t.active_power_kw * 1.05).toFixed(0)}` : 'N/A', uom: "kW" },
+        { name: "Power_Loss_Delta", ref: "Formula", config: `A=Expected_Power;B=Active_Power;[A-B]`, val: t.active_power_kw !== null ? `${(t.active_power_kw * 0.05).toFixed(0)}` : 'N/A', uom: "kW" }
       ];
 
       document.getElementById('af-attributes-table-body').innerHTML = rows.map(r => `
@@ -757,16 +764,18 @@
       ctx.stroke();
 
       const cur = turbines.find(item => item.turbine_id === selectedTurbineId) || turbines[0];
-      const liveX = 50 + (cur.wind_speed_mps / 25) * (w - 70);
-      const liveY = (h - 30) - (cur.active_power_kw / 3000) * (h - 60);
+      if (cur && cur.wind_speed_mps !== null && cur.active_power_kw !== null && !isNaN(cur.wind_speed_mps) && !isNaN(cur.active_power_kw)) {
+        const liveX = 50 + (cur.wind_speed_mps / 25) * (w - 70);
+        const liveY = (h - 30) - (cur.active_power_kw / 3000) * (h - 60);
 
-      ctx.fillStyle = '#f43f5e';
-      ctx.beginPath();
-      ctx.arc(liveX, liveY, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(liveX, liveY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       ctx.fillStyle = '#64748b';
       ctx.font = '10px JetBrains Mono';
@@ -926,20 +935,55 @@
       playTone(isStreaming ? 880 : 440);
     }
 
+    function escapeCsvField(val) {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    }
+
+    function formatCsvNumeric(val, decimals = 1) {
+      if (val === null || val === undefined || val === '') return '';
+      const num = Number(val);
+      if (!Number.isFinite(num)) return '';
+      return num.toFixed(decimals);
+    }
+
+    function generateTelemetryCsv(turbineList, timestamp) {
+      const now = timestamp || new Date().toISOString();
+      let csv = "Timestamp,Turbine,Feeder,ActivePower_kW,WindSpeed_mps,RotorRPM,NacelleYaw_deg,GearboxTemp_C\n";
+      (turbineList || []).forEach(t => {
+        const ap = formatCsvNumeric(t.active_power_kw, 1);
+        const ws = formatCsvNumeric(t.wind_speed_mps, 2);
+        const rpm = formatCsvNumeric(t.rotor_rpm, 1);
+        const yaw = formatCsvNumeric(t.nacelle_yaw_deg, 1);
+        const temp = formatCsvNumeric(t.gearbox_bearing_temp_c, 1);
+        csv += `${escapeCsvField(now)},${escapeCsvField(t.name)},${escapeCsvField(t.feeder)},${ap},${ws},${rpm},${yaw},${temp}\n`;
+      });
+      return csv;
+    }
+
     function exportTelemetryData(format) {
       playTone(900);
-      let csv = "Timestamp,Turbine,Feeder,ActivePower_kW,WindSpeed_mps,RotorRPM,NacelleYaw_deg,GearboxTemp_C\n";
-      const now = new Date().toISOString();
-      turbines.forEach(t => {
-        csv += `${now},${t.name},${t.feeder},${t.active_power_kw.toFixed(1)},${t.wind_speed_mps.toFixed(2)},${t.rotor_rpm.toFixed(1)},${t.nacelle_yaw_deg.toFixed(1)},${t.gearbox_bearing_temp_c.toFixed(1)}\n`;
-      });
+      const csv = generateTelemetryCsv(turbines);
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `WindPulse_Telemetry_${Date.now()}.csv`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+
+    // Expose for browser regression tests and inspection
+    window.escapeCsvField = escapeCsvField;
+    window.formatCsvNumeric = formatCsvNumeric;
+    window.generateTelemetryCsv = generateTelemetryCsv;
+    window.exportTelemetryData = exportTelemetryData;
 
     // Initialize UI and WebSocket
     renderTurbinesGrid();

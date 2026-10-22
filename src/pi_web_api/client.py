@@ -124,8 +124,29 @@ class AvevaPIWebApiClient:
 
         raise PIWebAPIClientError(f"PI Web API request failed: {last_error}")
 
+    async def ping_connection(self) -> Dict[str, Any]:
+        """
+        Performs a lightweight startup/health connectivity probe against the PI Web API instance.
+        GET /piwebapi/system/landing or GET /piwebapi/
+        Raises PIAuthenticationError or PIWebAPIClientError if unreachable or unauthorized.
+        """
+        if not self.base_url:
+            raise PIWebAPIClientError("PI_WEB_API_URL is not configured.")
+        try:
+            url = f"{self.base_url}/system/landing"
+            resp = await self._execute_with_retry("GET", url)
+            return await resp.json()
+        except PINotFoundError:
+            url_root = f"{self.base_url}/"
+            resp = await self._execute_with_retry("GET", url_root)
+            return await resp.json()
+
     async def get_database_by_path(self, path: str) -> Dict[str, Any]:
         """Discovers database and caches its WebID. GET /piwebapi/assetdatabases?path=\\\\{server}\\{db}"""
+        # Re-use cached WebID to prevent repeated network discovery for static configurations
+        if path in self.webid_cache:
+            return {"WebId": self.webid_cache[path], "Cached": True}
+
         if not self.base_url:
             raise PIWebAPIClientError("PI_WEB_API_URL is not configured.")
         url = f"{self.base_url}/assetdatabases"
@@ -146,7 +167,9 @@ class AvevaPIWebApiClient:
 
     async def get_streamset_values(self, web_ids: List[str]) -> Dict[str, PIStreamValue]:
         """
-        Retrieves multiple point values in a single round-trip using POST /piwebapi/batch.
+        Retrieves multiple point values in a single round-trip using the PI Web API Batch controller
+        (POST /piwebapi/batch). Note: This uses the Batch controller rather than native StreamSets,
+        grouping multiple sub-requests into a single HTTP payload to eliminate N+1 round trips.
         Returns a mapping of WebID -> PIStreamValue.
         """
         if not self.base_url:
@@ -175,7 +198,8 @@ class AvevaPIWebApiClient:
                 output[web_id] = PIStreamValue(
                     Timestamp=datetime.now(timezone.utc).isoformat(),
                     Value="No Data",
-                    Good=False
+                    Good=False,
+                    Questionable=True
                 )
         return output
 
@@ -190,7 +214,7 @@ class AvevaPIWebApiClient:
         Safety guards:
         1. Refuses execution if allow_writes is False.
         2. Refuses execution if web_id is not in approved_write_points.
-        3. Verifies write success by reading back the value.
+        3. Verifies write success by reading back the value within PI_WRITE_VERIFY_TOLERANCE.
         """
         if not self.base_url:
             raise PIWebAPIClientError("PI_WEB_API_URL is not configured.")
@@ -220,10 +244,17 @@ class AvevaPIWebApiClient:
             body = await resp.text()
             raise PIWebAPIClientError(f"PI Point write failed with HTTP {resp.status}: {body[:200]}")
 
-        # Verification: Read-back
+        # Verification: Read-back with configurable tolerance and strict quality check
+        tolerance = getattr(settings, "PI_WRITE_VERIFY_TOLERANCE", 0.05)
         read_back_stream = await self.get_stream_value(web_id)
         numeric_read_back = read_back_stream.get_numeric_value()
-        is_verified = (numeric_read_back is not None) and (abs(numeric_read_back - value) < 0.001)
+        
+        is_verified = (
+            read_back_stream.Good and
+            not read_back_stream.Questionable and
+            numeric_read_back is not None and
+            abs(numeric_read_back - value) <= tolerance
+        )
 
         return PIPointWriteResponse(
             web_id=web_id,

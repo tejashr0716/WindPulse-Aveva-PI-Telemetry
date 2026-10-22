@@ -11,6 +11,8 @@ def test_health_check_endpoint(client: TestClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "healthy"
+    assert data["liveness"] is True
+    assert data["readiness"] is True
     assert data["run_mode"] == "SIMULATION"
     assert data["is_simulated"] is True
     assert "NOT CONNECTED TO PI" in data["disclaimer"]
