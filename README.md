@@ -1,24 +1,30 @@
-# 🌪️ WindPulse — Renewable Wind & Solar Farm Fleet Telemetry via AVEVA OSIsoft PI Web API
+# 🌪️ WindPulse — Renewable Wind Fleet Telemetry & AVEVA OSIsoft PI Web API Architecture
 
-[![AVEVA OSIsoft PI](https://img.shields.io/badge/AVEVA-OSIsoft%20PI%20System-orange?style=flat-square&logo=aveva)](https://www.aveva.com)
-[![PI Web API](https://img.shields.io/badge/PI%20Web%20API-REST%20%26%20WebSockets-blue?style=flat-square)](https://docs.aveva.com)
-[![Asset Framework](https://img.shields.io/badge/PI%20AF-Hierarchical%20Templates-purple?style=flat-square)](https://docs.aveva.com)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Async%20Telemetry-emerald?style=flat-square)](https://fastapi.tiangolo.com)
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-success?style=flat-square)](https://tejashr0716.github.io/windpulse/)
+[![PI Web API Architecture](https://img.shields.io/badge/AVEVA-PI%20Web%20API%20Gateway-orange?style=flat-square)](https://docs.aveva.com)
+[![FastAPI Telemetry](https://img.shields.io/badge/FastAPI-Async%20Telemetry-emerald?style=flat-square)](https://fastapi.tiangolo.com)
+[![Pytest Suite](https://img.shields.io/badge/Tests-25%20Passed%20%7C%202%20Skipped-success?style=flat-square)](file:///Users/tejashr/live-projects/WindPulse-Aveva-PI-Telemetry/tests)
+[![Live UI Prototype](https://img.shields.io/badge/Live%20Prototype-GitHub%20Pages-blue?style=flat-square)](https://tejashr0716.github.io/windpulse/)
 
-> **Enterprise Custom Software Engineering Solution for Accenture Industry X & Utilities Practice**  
-> Real-time industrial telemetry engine integrating AVEVA OSIsoft PI Data Archive, PI Asset Framework (AF), and PI Web API for a multi-megawatt offshore wind turbine fleet.
+> **Industrial Telemetry & SCADA Gateway Prototype**  
+> Real-time wind turbine fleet telemetry engine demonstrating AVEVA OSIsoft PI Data Archive, PI Asset Framework (AF), and PI Web API integration contracts, accompanied by a physics-based simulation engine for local verification without requiring proprietary PI licenses.
 
 ---
 
-## 📌 Executive Summary & Accenture Alignment
+> [!IMPORTANT]
+> **SIMULATED DATA — NOT CONNECTED TO PI BY DEFAULT**  
+> Access to an active, licensed AVEVA PI Data Archive and PI Web API instance requires proprietary enterprise infrastructure and credentials. When running locally without active PI credentials (`RUN_MODE=SIMULATION`), WindPulse operates in a physics-based aerodynamic simulation mode with clear visual and API status indicators.
 
-In large-scale renewable generation, wind turbines operate under severe dynamic turbulence. Turbine wake effects, yaw misalignment, and mechanical overheating cause millions in annual revenue loss. 
+---
 
-**WindPulse** provides a scalable telemetry platform that bridges **AVEVA OSIsoft PI** operational data with modern cloud-native web architectures:
-- **Programmatic Ingestion:** Replaces static PI Vision displays with low-latency PI Web API REST and WebSocket (`/channels`) streams.
-- **Hierarchical Asset Modeling:** Utilizes PI Asset Framework (AF) element templates, formula references, and automated Event Frames.
-- **Real-Time Analytics:** Continuous Betz-limit power curve deviation tracking ($\Delta P$) and automated yaw misalignment excursion detection.
+## 📌 Implementation Status & Feature Matrix
+
+| Feature | Implementation Mode | Verification / Test Status | Notes |
+|---|---|---|---|
+| **Physics Aerodynamic Simulation** | Implemented (`src/simulation.py`) | Tested (`tests/test_simulation.py`) | Models Betz limit ($C_p \le 0.593$), cubic power curve, cut-in ($3.0\,\text{m/s}$), cut-out ($25.0\,\text{m/s}$), yaw misalignment losses ($\cos^2\theta$), and thermal dissipation. |
+| **PI Web API Async Client** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_client_contracts.py`) | Handles Basic and Bearer auth, WebID 2.0 caching, batch StreamSets, exponential backoff retries, and strict `Good=False` quality flag validation. |
+| **Point Value Write Safety Guard** | Implemented (`src/pi_web_api/client.py`) | Tested (`tests/test_pi_write_safety.py`) | Two-layer protection: disabled by default (`PI_ALLOW_WRITES=False`), requires tag whitelist matching, and performs mandatory read-back verification within tolerance. |
+| **FastAPI REST & WebSocket Hub** | Implemented (`src/main.py`) | Tested (`tests/test_api_endpoints.py`, `benchmarks/`) | 10Hz WebSocket streaming broadcast, snapshot REST queries, manual wind speed control, and emergency trip endpoints. |
+| **Real AVEVA PI Infrastructure** | Configured (`src/config.py`) | Gracefully Skipped (`tests/test_pi_real_integration.py`) | Requires authorized enterprise PI host. Marked skipped when `RUN_MODE != REAL_PI`. No fake live connections are claimed. |
 
 ---
 
@@ -26,108 +32,139 @@ In large-scale renewable generation, wind turbines operate under severe dynamic 
 
 ```mermaid
 flowchart TD
-    subgraph OT_Layer ["Industrial Field Layer (OT)"]
+    subgraph OT_Layer ["Industrial Field Layer / Physics Simulation"]
         Turbines["8x 2.5MW Wind Turbines (WTG-01 to 08)"]
-        Sensors["Anemometers, Strain Gauges, Thermocouples, Accels"]
-        Turbines --> Sensors
+        Physics["Aerodynamic & Thermal Physics Engine (Betz Curve, Yaw Loss)"]
+        Turbines --- Physics
     end
 
-    subgraph PI_System ["AVEVA OSIsoft PI System"]
-        Sensors -->|"Modbus TCP / OPC-UA"| PI_Int["PI Interface / PI Connector"]
-        PI_Int --> PI_DA["PI Data Archive (Time-Series Tags)"]
-        PI_DA <--> PI_AF["PI Asset Framework (AF Hierarchies & Templates)"]
-        PI_AF --> PI_EF["PI Event Frames (Alarms & Trips)"]
-        PI_AF <--> PI_WebAPI["AVEVA PI Web API (REST & WSS Channels)"]
+    subgraph Dual_Mode_Engine ["WindPulse Telemetry Service (src/main.py)"]
+        direction TB
+        ModeRouter{"RUN_MODE Selector"}
+        SimEngine["Simulation Engine (10Hz Local Broadcast)"]
+        PIClient["PI Web API Async Client (Batch StreamSets & Writes)"]
+        
+        ModeRouter -->|"SIMULATION (Default)"| SimEngine
+        ModeRouter -->|"REAL_PI (Configured)"| PIClient
     end
 
-    subgraph Custom_Software ["Custom Telemetry Software Layer"]
-        PI_WebAPI -->|"WSS /piwebapi/channels"| StreamEngine["FastAPI Telemetry Streamer"]
-        PI_WebAPI -->|"POST /piwebapi/batch"| BatchClient["Python Async PI Web API Client"]
-        StreamEngine --> Redis["Redis Ring Buffer (Zero-Allocation)"]
-        Redis --> WebSockets["WebSocket Hub (Pub/Sub)"]
+    subgraph AVEVA_PI ["AVEVA OSIsoft PI Infrastructure (Optional Enterprise)"]
+        PIClient -.->|"HTTPS REST / StreamSets"| PIWebAPI["AVEVA PI Web API"]
+        PIWebAPI -.-> AF["PI Asset Framework (AF)"]
+        PIWebAPI -.-> DA["PI Data Archive (Tags)"]
     end
 
-    subgraph UI_Layer ["SCADA-Grade Client Dashboard"]
-        WebSockets --> LiveConsole["Canvas 2D/3D Turbine Map (120 FPS)"]
-        WebSockets --> PowerCurve["Real-Time Betz Power Curve Visualizer"]
-        WebSockets --> AFExplorer["Navigable PI AF Element Tree Explorer"]
-        WebSockets --> NetSniffer["PI Web API REST Request/Response Inspector"]
+    subgraph Distribution ["Streaming & Consumer Layer"]
+        SimEngine --> WSHub["WebSocket Broadcaster (/ws/telemetry)"]
+        SimEngine --> REST["REST Endpoints (/api/telemetry/snapshot)"]
+        WSHub --> WebBrowser["Dashboard UI (public/index.html)"]
     end
 ```
 
 ---
 
-## 🌲 PI Asset Framework (AF) Hierarchy & Data Model
+## 🛡️ PI Web API Safety & Quality Assurance
 
-The Asset Framework model is structured using strict inheritance templates:
-
-```
-Global Clean Energy Corp (Database)
-└── Bighorn Offshore Wind Farm (Site Element)
-    ├── Substation 33kV/132kV
-    ├── Feeder Line A
-    │   ├── WTG-01 (WindTurbine_Template)
-    │   ├── WTG-02 (WindTurbine_Template)
-    │   ├── WTG-03 (WindTurbine_Template)
-    │   └── WTG-04 (WindTurbine_Template)
-    └── Feeder Line B
-        ├── WTG-05 (WindTurbine_Template)
-        ├── WTG-06 (WindTurbine_Template)
-        ├── WTG-07 (WindTurbine_Template)
-        └── WTG-08 (WindTurbine_Template)
+### 1. PI Data Quality Flag Validation
+In AVEVA PI, time-series streams return digital status indicators (e.g., `Scan Off`, `I/O Timeout`, `Bad Input`) with a boolean `Good: false` flag. The ingestion parser in `src/models.py` (`PIStreamValue.get_numeric_value()`) strictly rejects non-good or string digital state values:
+```python
+# Returns None for non-good or digital states to prevent corrupting downstream calculations
+if not self.Good:
+    return None
 ```
 
-### AF Attributes per Turbine Element:
-
-| Attribute Name | Data Reference | Description | Engineering Unit |
-|---|---|---|---|
-| `Wind_Speed` | PI Point (`WTG01.Anemometer.Speed`) | Hub-height ambient wind speed | $	ext{m/s}$ |
-| `Active_Power` | PI Point (`WTG01.Generator.P`) | Instantaneous electrical power output | $	ext{kW}$ |
-| `Nacelle_Yaw` | PI Point (`WTG01.Nacelle.YawAngle`) | Orientation angle relative to True North | $	ext{degrees}$ |
-| `Rotor_RPM` | PI Point (`WTG01.Rotor.Speed`) | Low-speed shaft rotational velocity | $	ext{RPM}$ |
-| `Gearbox_Bearing_Temp` | PI Point (`WTG01.Gearbox.Temp`) | High-speed stage bearing thermocouple | $^\circ	ext{C}$ |
-| `Generator_Temp` | PI Point (`WTG01.Gen.WindingTemp`) | Stator copper winding temperature | $^\circ	ext{C}$ |
-| `Expected_Power` | Formula Reference | $P_{	ext{ideal}} = 0.5 	imes ho 	imes A 	imes v^3 	imes C_p$ | $	ext{kW}$ |
-| `Power_Loss_Delta` | Formula Reference | `Expected_Power - Active_Power` | $	ext{kW}$ |
+### 2. Guarded Point Write Protection
+Writing setpoints or overrides to industrial PI Points can disrupt plant operations. WindPulse implements strict safeguards:
+1. **Global Killswitch:** `PI_ALLOW_WRITES` defaults to `False`. Writes raise a `PermissionError` immediately if disabled.
+2. **Point Whitelist:** Writes are validated against `PI_APPROVED_WRITE_POINTS`. Unregistered tags are blocked.
+3. **Read-Back Verification:** Every successful write triggers an immediate read-back query to ensure the Data Archive accepted the value within a configurable tolerance ($\pm 0.05$).
 
 ---
 
-## ⚡ Key PI Web API Endpoints Implemented
+## 🔬 Reproducible Benchmark Results
 
-1. **Hierarchy Discovery:**
-   * `GET /piwebapi/assetdatabases/{webId}/elements` — Discovers wind farm sites and feeders.
-   * `GET /piwebapi/elements/{webId}/attributes` — Retrieves AF attributes and WebIDs.
-2. **Stream Retrieval:**
-   * `GET /piwebapi/streamsets/getinterpolated` — Retrieves synchronized multi-turbine values.
-   * `POST /piwebapi/batch` — Consolidates 100+ tag queries into a single round-trip HTTP request.
-3. **High-Frequency Real-Time Telemetry:**
-   * `WSS /piwebapi/channels?webId={webId}&includeInitialValues=true` — Subscribes to continuous WebSocket streams for turbine active power, wind speed, and vibration.
-4. **Event Frames Generation:**
-   * `GET /piwebapi/eventframes` & `POST /piwebapi/eventframes` — Tracks `HIGH_WIND_CUTOUT`, `YAW_EXCURSION`, and `GEARBOX_OVERHEAT`.
+All benchmarks were run locally against the live FastAPI Uvicorn server (`http://127.0.0.1:8001`). Raw output artifacts are version-controlled in [`benchmarks/results/`](benchmarks/results/).
+
+### 1. Network WebSocket Frame Delivery
+- **Script:** `python benchmarks/benchmark_simulation.py`
+- **Clients:** 20 concurrent network WebSocket connections (using the `websockets` library over real TCP sockets)
+- **Duration:** 5.1 seconds
+- **Total Frames Delivered:** 1,020 frames
+- **Connection Failures:** 0
+- **Throughput:** 200.0 frames/sec (10Hz broadcast across 20 clients)
+- **Inter-Frame Latency:**
+  - **P50:** 102.87 ms
+  - **P95:** 106.18 ms
+  - **P99:** 108.02 ms
+
+### 2. HTTP REST Fleet Snapshot Query
+- **Requests:** 200 requests (concurrency: 10)
+- **Endpoint:** `GET /api/telemetry/snapshot`
+- **Successful Responses:** 200 / 200 (100%)
+- **Throughput:** 570.5 requests/sec
+- **Round-Trip Latency:**
+  - **P50:** 13.08 ms
+  - **P95:** 30.08 ms
+  - **P99:** 79.03 ms
+
+### 3. Real PI Web API Round-Trip Latency
+- **Result:** `NOT MEASURED — NO LICENSED PI INFRASTRUCTURE CONFIGURED`
+- *Note:* Real PI Web API response times depend on network routing, PI Data Archive indexing, and Kerberos/Basic authentication overhead. WindPulse does not extrapolate or fabricate real PI latencies.
+
+**Raw Evidence Files:**
+- JSON: [`benchmarks/results/windpulse_benchmark_1792684007.json`](benchmarks/results/windpulse_benchmark_1792684007.json)
+- CSV: [`benchmarks/results/windpulse_benchmark_1792684007.csv`](benchmarks/results/windpulse_benchmark_1792684007.csv)
 
 ---
 
-## 🎯 Accenture Technical Interview Guide (Cheat Sheet)
+## 🚀 Reproduction & Verification Commands
+
+### 1. Environment Setup
+```bash
+git clone https://github.com/tejashr0716/WindPulse-Aveva-PI-Telemetry.git
+cd WindPulse-Aveva-PI-Telemetry
+git checkout grounded-implementation
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Run Test Suite
+```bash
+pytest -v
+```
+*Expected Result:* `25 passed, 2 skipped in ~0.06s` (Real PI tests skipped due to absent enterprise credentials).
+
+### 3. Run FastAPI Telemetry Server
+```bash
+python3 src/main.py
+# Server starts at http://127.0.0.1:8001
+# API docs available at http://127.0.0.1:8001/docs
+```
+
+### 4. Execute Benchmark Suite
+In a separate terminal while the server is running:
+```bash
+python3 benchmarks/benchmark_simulation.py
+```
+
+### 5. Access Frontend Prototype
+Serve the static dashboard or open `public/index.html` in any browser:
+```bash
+python3 -m http.server 3000 --directory public
+```
+Navigate to `http://127.0.0.1:3000`. The UI will connect to `ws://127.0.0.1:8001/ws/telemetry` and display live turbine metrics with the `SIMULATED DATA — NOT CONNECTED TO PI` disclaimer badge.
+
+---
+
+## 📖 Industrial Telemetry Architecture Guide
 
 ### Q1: What is the benefit of PI Web API over PI OLEDB or traditional AF SDK?
-> **Answer:** PI AF SDK is bound to Windows .NET environments. PI Web API is a platform-independent, RESTful and WebSocket-enabled gateway that allows cloud-native microservices (Python, Go, Node.js) and modern web frontends (React, Next.js) running on Linux or Kubernetes to stream time-series and AF data securely across corporate firewalls.
+> **Answer:** PI AF SDK is bound to Windows .NET environments. PI Web API is a platform-independent, RESTful and WebSocket-enabled gateway that allows cloud-native microservices (Python, Go, Node.js) and modern web frontends running on Linux or containerized environments to interact with time-series and AF data securely across enterprise firewalls.
 
-### Q2: How do you optimize PI Web API performance when querying thousands of tags?
-> **Answer:** Never query single streams (`/streams/{webId}/value`) in loops. Instead, use:
-> 1. **PI Web API StreamSets** (`/streamsets/getrecorded` or `/streamsets/getinterpolated`) to pull arrays of related points in a single call.
-> 2. **PI Web API Batch Controller** (`POST /piwebapi/batch`) to batch diverse requests.
-> 3. **PI Web API Channels (WebSockets)** to eliminate HTTP polling overhead entirely.
-> 4. **WebID 2.0 Caching** to bypass element path resolution overhead.
-
----
-
-## 🚀 Live Demo & Quick Start
-
-* **Live Interactive Application:** [https://tejashr0716.github.io/windpulse/](https://tejashr0716.github.io/windpulse/)
-* **Local Run:**
-  ```bash
-  git clone https://github.com/tejashr0716/WindPulse-Aveva-PI-Telemetry.git
-  cd WindPulse-Aveva-PI-Telemetry
-  pip install -r requirements.txt
-  python src/main.py
-  ```
+### Q2: How do you optimize PI Web API query performance across thousands of tags?
+> **Answer:** Never query single streams (`/streams/{webId}/value`) in sequential loops. Instead:
+> 1. Use **PI Web API StreamSets** (`/streamsets/getrecorded` or `/streamsets/getinterpolated`) to pull arrays of related points in a single HTTP call.
+> 2. Use the **PI Web API Batch Controller** (`POST /piwebapi/batch`) to consolidate multiple REST requests into a single network round trip.
+> 3. Use **PI Web API Channels (WebSockets)** for streaming push notifications rather than polling.
+> 4. Cache **WebID 2.0** identifiers locally to bypass path-resolution round trips.

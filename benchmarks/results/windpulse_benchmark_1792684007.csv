@@ -1,0 +1,3 @@
+Benchmark,Clients/Requests,Total Delivered,Throughput,P50_ms,P95_ms,P99_ms
+WEBSOCKET_NETWORK_TELEMETRY,20,1020,200.0 frames/s,102.869,106.184,108.021
+HTTP_REST_ROUND_TRIP,200,200,570.5 req/s,13.084,30.082,79.034

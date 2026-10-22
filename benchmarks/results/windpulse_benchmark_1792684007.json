@@ -1,0 +1,46 @@
+{
+  "timestamp_utc": "2026-10-22T15:46:47.740481+00:00",
+  "git_commit_sha": "7c58689b188c4c7f16f265d5c0f5073ec1e82b42",
+  "platform": {
+    "system": "Darwin",
+    "release": "27.0.0",
+    "machine": "arm64",
+    "python_version": "3.14.6"
+  },
+  "real_pi_status": "NOT MEASURED \u2014 NO LICENSED PI INFRASTRUCTURE CONFIGURED",
+  "results": {
+    "websocket_telemetry": {
+      "benchmark_type": "WEBSOCKET_NETWORK_TELEMETRY",
+      "description": "Network WebSocket frame arrival interval across concurrent subscribers",
+      "client_connections": 20,
+      "duration_seconds": 5.1,
+      "total_frames_delivered": 1020,
+      "connection_errors": 0,
+      "throughput_frames_per_sec": 200.0,
+      "inter_frame_latency_ms": {
+        "p50": 102.869,
+        "p95": 106.184,
+        "p99": 108.021,
+        "min": 2.236,
+        "max": 108.497
+      }
+    },
+    "http_rest_snapshot": {
+      "benchmark_type": "HTTP_REST_ROUND_TRIP",
+      "description": "Client-to-server round-trip latency for full fleet telemetry JSON snapshot",
+      "total_requests": 200,
+      "concurrency": 10,
+      "duration_seconds": 0.351,
+      "successful_responses": 200,
+      "failed_responses": 0,
+      "throughput_req_per_sec": 570.5,
+      "round_trip_latency_ms": {
+        "p50": 13.084,
+        "p95": 30.082,
+        "p99": 79.034,
+        "min": 5.741,
+        "max": 160.356
+      }
+    }
+  }
+}
