@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WindPulse — Renewable Fleet Telemetry via AVEVA OSIsoft PI Web API</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#f0fdf4', 500: '#10b981', 600: '#059669', 700: '#047857' },
+            pi: { blue: '#0284c7', orange: '#ea580c', purple: '#8b5cf6' }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0b0f19; color: #e2e8f0; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glass-card { background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.6); }
+    .glass-card:hover { border-color: rgba(16, 185, 129, 0.5); }
+    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #0b0f19; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #10b981; }
+    .tab-btn.active { background: rgba(16, 185, 129, 0.2); color: #34d399; border-bottom: 2px solid #10b981; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
+
+  <!-- TOP INDUSTRIAL HEADER -->
+  <header class="border-b border-slate-800 bg-slate-950/90 sticky top-0 z-40 backdrop-blur-md">
+    <div class="max-w-[1720px] mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <!-- Title & Industrial Badges -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+          <i class="fa-solid fa-fan text-lg animate-spin" style="animation-duration: 4s;"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+              WindPulse
+              <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono border border-emerald-500/30">AVEVA PI Web API v2023</span>
+            </h1>
+          </div>
+          <p class="text-[11px] text-slate-400 font-mono flex items-center gap-2">
+            <span>DA: <strong class="text-slate-200">PIDA01</strong></span>
+            <span>•</span>
+            <span>AF: <strong class="text-slate-200">GlobalCleanEnergy</strong></span>
+            <span>•</span>
+            <span class="flex items-center gap-1 text-emerald-400"><i class="fa-solid fa-circle text-[8px] animate-pulse"></i> WSS /channels (20Hz)</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Live Telemetry KPI Pills -->
+      <div class="hidden xl:flex items-center gap-4 text-xs font-mono">
+        <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+          <span class="text-slate-400">Total Fleet Output:</span>
+          <span class="text-emerald-400 font-bold ml-1.5" id="kpi-total-power">16.42 MW</span>
+          <span class="text-slate-500 text-[10px]">/ 20 MW</span>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+          <span class="text-slate-400">Avg Wind Speed:</span>
+          <span class="text-cyan-400 font-bold ml-1.5" id="kpi-avg-wind">11.4 m/s</span>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+          <span class="text-slate-400">Capacity Factor:</span>
+          <span class="text-purple-400 font-bold ml-1.5" id="kpi-cap-factor">82.1%</span>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+          <span class="text-slate-400">Active Event Frames:</span>
+          <span class="text-amber-400 font-bold ml-1.5" id="kpi-event-frames">2 Open</span>
+        </div>
+      </div>
+
+      <!-- Action & Control Buttons -->
+      <div class="flex items-center gap-2">
+        <button onclick="toggleTelemetryStream()" id="btn-stream" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-play" id="icon-stream"></i> <span id="label-stream">Streaming (20Hz)</span>
+        </button>
+        <button onclick="toggleInspectorDrawer()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 font-mono text-xs flex items-center gap-1.5 transition" title="Inspect Live PI Web API Requests & JSON Payloads">
+          <i class="fa-solid fa-network-wired"></i> PI Web API Inspector
+        </button>
+        <button onclick="toggleAudioSynthesizer()" id="btn-audio" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition" title="Toggle Industrial Telemetry Audio">
+          <i class="fa-solid fa-volume-high" id="icon-audio"></i>
+        </button>
+        <button onclick="exportTelemetryData('csv')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition" title="Export CSV Report">
+          <i class="fa-solid fa-file-csv"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs Bar -->
+    <div class="max-w-[1720px] mx-auto px-4 flex items-center gap-1 border-t border-slate-800/60 overflow-x-auto custom-scrollbar">
+      <button onclick="switchTab('fleet')" id="tab-fleet" class="tab-btn active px-4 py-2 text-xs font-semibold tracking-wide transition flex items-center gap-2">
+        <i class="fa-solid fa-wind text-emerald-400"></i> Turbine Fleet Matrix
+      </button>
+      <button onclick="switchTab('af-tree')" id="tab-af-tree" class="tab-btn px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white tracking-wide transition flex items-center gap-2">
+        <i class="fa-solid fa-sitemap text-purple-400"></i> PI Asset Framework (AF)
+      </button>
+      <button onclick="switchTab('power-curve')" id="tab-power-curve" class="tab-btn px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white tracking-wide transition flex items-center gap-2">
+        <i class="fa-solid fa-chart-line text-cyan-400"></i> Power Curve & Betz Limit
+      </button>
+      <button onclick="switchTab('event-frames')" id="tab-event-frames" class="tab-btn px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white tracking-wide transition flex items-center gap-2">
+        <i class="fa-solid fa-bell text-amber-400"></i> PI Event Frames & Trips
+      </button>
+      <button onclick="switchTab('interview')" id="tab-interview" class="tab-btn px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white tracking-wide transition flex items-center gap-2">
+        <i class="fa-solid fa-graduation-cap text-rose-400"></i> Accenture Interview Playbook
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="flex-1 max-w-[1720px] w-full mx-auto p-4 space-y-4">
+
+    <!-- VIEW 1: TURBINE FLEET SCADA MATRIX -->
+    <section id="view-fleet" class="space-y-4">
+      <!-- Interactive Fleet Control Bar -->
+      <div class="glass-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400 font-mono">Ambient Wind Speed:</span>
+            <input type="range" id="slider-wind" min="0" max="25" step="0.5" value="11.5" class="w-28 accent-emerald-500" oninput="onWindSliderChange(this.value)">
+            <span class="text-xs font-mono font-bold text-cyan-400" id="val-wind-slider">11.5 m/s</span>
+          </div>
+          <div class="h-4 w-px bg-slate-800"></div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400 font-mono">Wind Direction:</span>
+            <input type="range" id="slider-dir" min="0" max="360" step="5" value="230" class="w-24 accent-cyan-500" oninput="onDirSliderChange(this.value)">
+            <span class="text-xs font-mono font-bold text-slate-200" id="val-dir-slider">230° SW</span>
+          </div>
+        </div>
+
+        <!-- Simulation Scenario Triggers -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button onclick="triggerWindGust()" class="px-2.5 py-1.5 rounded-lg bg-cyan-900/40 border border-cyan-700/50 hover:bg-cyan-800/50 text-cyan-300 text-xs font-mono transition">
+            <i class="fa-solid fa-bolt"></i> +8 m/s Wind Gust
+          </button>
+          <button onclick="simulateYawMisalignment()" class="px-2.5 py-1.5 rounded-lg bg-amber-900/40 border border-amber-700/50 hover:bg-amber-800/50 text-amber-300 text-xs font-mono transition">
+            <i class="fa-solid fa-compass"></i> +25° Yaw Error
+          </button>
+          <button onclick="simulateGearboxOverheat()" class="px-2.5 py-1.5 rounded-lg bg-rose-900/40 border border-rose-700/50 hover:bg-rose-800/50 text-rose-300 text-xs font-mono transition">
+            <i class="fa-solid fa-temperature-arrow-up"></i> Trip Gearbox Temp
+          </button>
+          <button onclick="resetAllTurbines()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-xs font-mono transition">
+            <i class="fa-solid fa-rotate-left"></i> Reset Fleet
+          </button>
+        </div>
+      </div>
+
+      <!-- Turbines Grid (2 Rows of 4 Turbines) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="turbines-grid">
+        <!-- Rendered via JavaScript -->
+      </div>
+
+      <!-- Focused Turbine Deep Telemetry Modal / Card -->
+      <div class="glass-card rounded-2xl p-5 border border-emerald-500/40 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+              <h3 class="text-sm font-bold text-white font-mono uppercase" id="focus-turbine-title">Turbine Focus: WTG-01 (Feeder A)</h3>
+              <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700" id="focus-turbine-tag">AF Template: WindTurbine_Template</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Continuous 20Hz telemetry stream ingested through AVEVA PI Web API WebSocket Channel</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <span class="text-slate-400">WebID:</span>
+            <code class="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-emerald-400 text-[10px]" id="focus-webid">P0AbCD12345FeederA_WTG01</code>
+          </div>
+        </div>
+
+        <!-- 8 Real-Time PI Point Telemetry Gauges -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3" id="telemetry-gauges-grid">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: PI ASSET FRAMEWORK (AF) TREE EXPLORER -->
+    <section id="view-af-tree" class="hidden space-y-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Left: Navigable AF Hierarchy Tree -->
+        <div class="glass-card rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+              <i class="fa-solid fa-folder-tree text-purple-400"></i> AF Element Hierarchy
+            </h3>
+            <span class="text-[10px] text-slate-400 font-mono">Database: GlobalCleanEnergy</span>
+          </div>
+
+          <div class="space-y-1 font-mono text-xs custom-scrollbar max-h-[500px] overflow-y-auto" id="af-tree-container">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <!-- Right: AF Attributes & Data References Table -->
+        <div class="glass-card rounded-2xl p-5 lg:col-span-2 space-y-3">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div>
+              <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                <i class="fa-solid fa-list-check text-emerald-400"></i> AF Attributes & Data References
+              </h3>
+              <p class="text-[11px] text-slate-400 font-mono mt-0.5" id="af-selected-elem-path">Path: \PISYSTEM01\GlobalCleanEnergy\Bighorn Offshore\Feeder A\WTG-01</p>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">Inherited from Template</span>
+          </div>
+
+          <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-xs font-mono">
+              <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800">
+                <tr>
+                  <th class="py-2.5 px-3">Attribute Name</th>
+                  <th class="py-2.5 px-3">Data Reference</th>
+                  <th class="py-2.5 px-3">Config / Tag Path</th>
+                  <th class="py-2.5 px-3 text-right">Live Value</th>
+                  <th class="py-2.5 px-3">UOM</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60" id="af-attributes-table-body">
+                <!-- Rendered by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: POWER CURVE & BETZ LIMIT ANALYZER -->
+    <section id="view-power-curve" class="hidden space-y-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Canvas Chart -->
+        <div class="glass-card rounded-2xl p-5 lg:col-span-2 space-y-3">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div>
+              <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                <i class="fa-solid fa-chart-line text-cyan-400"></i> Wind Turbine Power Curve vs. Betz Limit
+              </h3>
+              <p class="text-[11px] text-slate-400 font-mono">Real-time operating point versus theoretical Betz limit (Cp=0.593) and OEM rated curve</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs font-mono">
+              <span class="flex items-center gap-1 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span> OEM Curve</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span> Betz Limit</span>
+              <span class="flex items-center gap-1 text-rose-400 font-bold"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span> Live Point</span>
+            </div>
+          </div>
+
+          <div class="relative w-full h-[360px] bg-slate-950/80 rounded-xl p-2 border border-slate-800 flex items-center justify-center">
+            <canvas id="power-curve-canvas" class="w-full h-full"></canvas>
+          </div>
+        </div>
+
+        <!-- Power Calculations & Wake Metrics -->
+        <div class="glass-card rounded-2xl p-5 space-y-4">
+          <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono border-b border-slate-800 pb-2">
+            Aerodynamic & Wake Model
+          </h3>
+          <div class="space-y-3 text-xs font-mono">
+            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span class="text-slate-400 text-[10px]">Air Density (ρ):</span>
+              <div class="text-white font-bold">1.225 kg/m³ (Sea Level Standard)</div>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span class="text-slate-400 text-[10px]">Rotor Swept Area (A):</span>
+              <div class="text-white font-bold">11,310 m² (120m Rotor Diameter)</div>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span class="text-slate-400 text-[10px]">Instantaneous Aerodynamic Efficiency (Cp):</span>
+              <div class="text-emerald-400 font-bold text-base" id="val-cp">0.442 / 0.593</div>
+              <span class="text-slate-500 text-[10px]">74.5% of theoretical Betz maximum</span>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900 border border-amber-500/30 space-y-1">
+              <span class="text-amber-400 text-[10px]">Calculated Wake & Yaw Deficit (ΔP):</span>
+              <div class="text-rose-400 font-bold text-base" id="val-delta-p">-84.5 kW</div>
+              <span class="text-slate-500 text-[10px]">AF Formula: Expected_Power - Active_Power</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: PI EVENT FRAMES & TRIPS -->
+    <section id="view-event-frames" class="hidden space-y-4">
+      <div class="glass-card rounded-2xl p-5 space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
+          <div>
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+              <i class="fa-solid fa-bell text-amber-400"></i> Active & Historical PI Event Frames
+            </h3>
+            <p class="text-[11px] text-slate-400 font-mono">Automated excursion detection via PI AF Event Frame generation analyses</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="clearAcknowledgedEvents()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono border border-slate-700 transition">
+              Acknowledge All
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scrollbar">
+          <table class="w-full text-left text-xs font-mono">
+            <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3">Event Frame ID</th>
+                <th class="py-2.5 px-3">Turbine Asset</th>
+                <th class="py-2.5 px-3">Event Type</th>
+                <th class="py-2.5 px-3">Trigger Condition</th>
+                <th class="py-2.5 px-3">Duration</th>
+                <th class="py-2.5 px-3">Severity</th>
+                <th class="py-2.5 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60" id="event-frames-tbody">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 5: ACCENTURE INTERVIEW PLAYBOOK -->
+    <section id="view-interview" class="hidden space-y-4">
+      <div class="glass-card rounded-2xl p-6 border border-emerald-500/30 space-y-5">
+        <div class="border-b border-slate-800 pb-3">
+          <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">ACCENTURE INTERVIEW READINESS GUIDE</span>
+          <h2 class="text-base font-bold text-white mt-2">Custom Software Engineering with AVEVA OSIsoft PI System</h2>
+          <p class="text-xs text-slate-400 mt-1">Explanations and architectural reasoning designed to impress technical evaluators and solution architects.</p>
+        </div>
+
+        <div class="space-y-4">
+          <!-- Question 1 -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+            <h4 class="text-xs font-bold text-emerald-400 font-mono">Q1: "Why would an enterprise build a custom web app via PI Web API rather than just using AVEVA PI Vision?"</h4>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              <strong>Answer:</strong> PI Vision is an operational dashboarding tool intended for plant operators, but it lacks customizable micro-frontend capabilities, native integration with proprietary ML/AI control loops (like dynamic wake steering), role-based multi-tenant customer portals, and integration with modern enterprise identity providers (OAuth2/OIDC). By building custom software over the <strong>AVEVA PI Web API</strong>, we deliver tailored, high-frequency, sub-second telemetry interfaces while bypassing expensive client licensing constraints.
+            </p>
+          </div>
+
+          <!-- Question 2 -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+            <h4 class="text-xs font-bold text-cyan-400 font-mono">Q2: "Explain the architecture of PI Asset Framework (AF) Templates and how they scale."</h4>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              <strong>Answer:</strong> In large fleet operations (like 500 wind turbines), managing individual PI Points is unsustainable. PI AF decouples raw tags from business logic using <strong>Element Templates</strong>. We define a single <code>WindTurbine_Template</code> with standardized attributes (e.g. <code>%Element%.ActivePower</code>). Any formula references, roll-up analyses, or Event Frame triggers written on the template automatically propagate to all 500 instances across sites and feeders, ensuring enterprise-wide governance.
+            </p>
+          </div>
+
+          <!-- Question 3 -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+            <h4 class="text-xs font-bold text-purple-400 font-mono">Q3: "How do you handle PI Web API rate limits and network latency during high-frequency ingestion?"</h4>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              <strong>Answer:</strong> Four core architectural strategies:
+              <br>1. <strong>PI WebSockets Channels:</strong> Use <code>/piwebapi/channels</code> to establish persistent bidirectional duplex streams, removing HTTP handshake latency.
+              <br>2. <strong>StreamSets & Batch Requests:</strong> Use <code>/streamsets/getinterpolated</code> or <code>POST /batch</code> to retrieve 100+ tag values in a single network round-trip.
+              <br>3. <strong>WebID 2.0 Caching:</strong> Cache immutable 28-character Base64 WebIDs in Redis to eliminate costly path-to-ID lookup calls.
+              <br>4. <strong>Client-Side Ring Buffering:</strong> Feed real-time streams into fixed-size typed array circular buffers (`Float64Array`) to eliminate garbage collection pauses.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- PI WEB API LIVE NETWORK INSPECTOR DRAWER -->
+  <aside id="inspector-drawer" class="fixed right-0 top-0 bottom-0 w-full sm:w-[540px] bg-slate-950 border-l border-slate-800 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 flex flex-col font-mono text-xs">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-network-wired text-cyan-400"></i>
+        <h3 class="font-bold text-white uppercase tracking-wider text-xs">PI Web API Network Sniffer</h3>
+      </div>
+      <button onclick="toggleInspectorDrawer()" class="text-slate-400 hover:text-white text-base">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Live Request Feed -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar" id="inspector-logs">
+      <!-- Injected by JS -->
+    </div>
+
+    <div class="p-3 border-t border-slate-800 bg-slate-900/40 flex items-center justify-between text-[11px] text-slate-400">
+      <span id="inspector-status"><i class="fa-solid fa-circle text-emerald-400 text-[8px] animate-pulse"></i> Channel: Active</span>
+      <button onclick="clearInspectorLogs()" class="hover:text-white transition">Clear Logs</button>
+    </div>
+  </aside>
+
+  <!-- JAVASCRIPT INDUSTRIAL TELEMETRY ENGINE -->
+  <script>
+    // --- GLOBAL FLEET TELEMETRY STATE ---
+    let isStreaming = true;
+    let audioEnabled = true;
+    let ambientWindSpeed = 11.5;
+    let windDirection = 230; // degrees
+    let selectedTurbineId = 1;
+    let audioCtx = null;
+
+    // 8 Wind Turbines State
+    const turbines = Array.from({ length: 8 }, (_, i) => {
+      const id = i + 1;
+      const feeder = id <= 4 ? "Feeder A" : "Feeder B";
+      return {
+        id: id,
+        name: `WTG-0${id}`,
+        feeder: feeder,
+        webId: `P0AbCD12345${feeder.replace(' ', '')}_WTG0${id}`,
+        activePower: 1850 + Math.random() * 200, // kW
+        windSpeed: 11.2 + Math.random() * 0.8,   // m/s
+        rotorRpm: 14.2 + Math.random() * 0.5,    // RPM
+        nacelleYaw: 228 + Math.floor(Math.random() * 6), // deg
+        gearboxTemp: 68 + Math.floor(Math.random() * 5), // °C
+        genTemp: 74 + Math.floor(Math.random() * 4),     // °C
+        pitchAngle: 2.1, // deg
+        status: 'NORMAL', // NORMAL, WARNING, TRIP, CURTAILED
+        bladeAngle: Math.random() * 360
+      };
+    });
+
+    // Event Frames
+    const eventFrames = [
+      { id: "EF-9041", turbine: "WTG-03", type: "YAW_MISALIGNMENT_EXCURSION", trigger: "NacelleYaw - WindDir > 15° for > 120s", duration: "4m 12s", severity: "WARNING", ack: false },
+      { id: "EF-9038", turbine: "WTG-07", type: "GEARBOX_HIGH_TEMP", trigger: "GearboxTemp > 75°C", duration: "12m 45s", severity: "CRITICAL", ack: false }
+    ];
+
+    // Audio Tone Synthesizer
+    function playTone(freq = 440, type = 'sine', dur = 0.1) {
+      if (!audioEnabled) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+      } catch(e) {}
+    }
+
+    // Toggle Audio
+    function toggleAudioSynthesizer() {
+      audioEnabled = !audioEnabled;
+      const icon = document.getElementById("icon-audio");
+      icon.className = audioEnabled ? "fa-solid fa-volume-high text-emerald-400" : "fa-solid fa-volume-xmark text-slate-500";
+      playTone(audioEnabled ? 880 : 330);
+    }
+
+    // Tab Switching
+    function switchTab(tabName) {
+      playTone(660);
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.getElementById('tab-' + tabName).classList.add('active');
+
+      ['fleet', 'af-tree', 'power-curve', 'event-frames', 'interview'].forEach(view => {
+        const el = document.getElementById('view-' + view);
+        if (view === tabName) {
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      });
+
+      if (tabName === 'af-tree') renderAfTree();
+      if (tabName === 'power-curve') drawPowerCurve();
+      if (tabName === 'event-frames') renderEventFrames();
+    }
+
+    // Render Turbine Grid Cards
+    function renderTurbinesGrid() {
+      const container = document.getElementById('turbines-grid');
+      container.innerHTML = turbines.map(t => {
+        let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">ONLINE</span>`;
+        let cardBorder = selectedTurbineId === t.id ? "border-emerald-500 ring-2 ring-emerald-500/30" : "border-slate-800";
+        if (t.status === 'WARNING') statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">YAW WARN</span>`;
+        if (t.status === 'TRIP') statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse">TRIP</span>`;
+
+        return `
+          <div onclick="selectTurbine(${t.id})" class="glass-card rounded-2xl p-4 cursor-pointer transition transform hover:-translate-y-0.5 ${cardBorder}">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-fan text-emerald-400 text-sm" style="transform: rotate(${t.bladeAngle}deg)"></i>
+                <span class="font-bold font-mono text-white text-xs">${t.name}</span>
+                <span class="text-[10px] text-slate-500 font-mono">${t.feeder}</span>
+              </div>
+              ${statusBadge}
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mt-3 font-mono text-xs">
+              <div class="space-y-0.5">
+                <span class="text-slate-500 text-[10px]">Active Power</span>
+                <div class="font-bold text-emerald-400 text-sm">${(t.activePower / 1000).toFixed(2)} MW</div>
+              </div>
+              <div class="space-y-0.5">
+                <span class="text-slate-500 text-[10px]">Rotor Speed</span>
+                <div class="font-bold text-cyan-300 text-sm">${t.rotorRpm.toFixed(1)} RPM</div>
+              </div>
+              <div class="space-y-0.5">
+                <span class="text-slate-500 text-[10px]">Wind Speed</span>
+                <div class="font-bold text-slate-200 text-sm">${t.windSpeed.toFixed(1)} m/s</div>
+              </div>
+              <div class="space-y-0.5">
+                <span class="text-slate-500 text-[10px]">Gearbox Temp</span>
+                <div class="font-bold ${t.gearboxTemp > 75 ? 'text-rose-400' : 'text-slate-300'} text-sm">${t.gearboxTemp}°C</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Select Turbine for Gauge Inspection
+    function selectTurbine(id) {
+      selectedTurbineId = id;
+      playTone(740);
+      renderTurbinesGrid();
+      renderFocusedTurbineGauges();
+    }
+
+    // Render Gauges for Focused Turbine
+    function renderFocusedTurbineGauges() {
+      const t = turbines.find(item => item.id === selectedTurbineId);
+      if (!t) return;
+
+      document.getElementById('focus-turbine-title').innerText = `Turbine Focus: ${t.name} (${t.feeder})`;
+      document.getElementById('focus-webid').innerText = t.webId;
+
+      const gauges = [
+        { label: "Active Power", value: `${t.activePower.toFixed(0)} kW`, sub: "Tag: WTG.ActivePower", color: "text-emerald-400" },
+        { label: "Wind Speed", value: `${t.windSpeed.toFixed(2)} m/s`, sub: "Tag: WTG.WindSpeed", color: "text-cyan-400" },
+        { label: "Rotor Speed", value: `${t.rotorRpm.toFixed(1)} RPM`, sub: "Tag: WTG.RotorRPM", color: "text-purple-400" },
+        { label: "Nacelle Yaw", value: `${t.nacelleYaw}°`, sub: `Yaw Error: ${Math.abs(t.nacelleYaw - windDirection)}°`, color: "text-amber-400" },
+        { label: "Gearbox Temp", value: `${t.gearboxTemp}°C`, sub: "Trip: 85°C", color: t.gearboxTemp > 75 ? "text-rose-400" : "text-slate-300" },
+        { label: "Generator Temp", value: `${t.genTemp}°C`, sub: "Trip: 95°C", color: "text-slate-300" },
+        { label: "Blade Pitch", value: `${t.pitchAngle.toFixed(1)}°`, sub: "Auto-feather", color: "text-slate-300" },
+        { label: "Power Loss ΔP", value: `${(t.activePower * 0.04).toFixed(0)} kW`, sub: "Formula: Ideal-Actual", color: "text-rose-400" }
+      ];
+
+      const grid = document.getElementById('telemetry-gauges-grid');
+      grid.innerHTML = gauges.map(g => `
+        <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1 font-mono">
+          <span class="text-slate-400 text-[10px] block truncate">${g.label}</span>
+          <div class="text-base font-bold ${g.color} truncate">${g.value}</div>
+          <span class="text-[9px] text-slate-500 block truncate">${g.sub}</span>
+        </div>
+      `).join('');
+    }
+
+    // AF Tree Rendering
+    function renderAfTree() {
+      const container = document.getElementById('af-tree-container');
+      container.innerHTML = `
+        <div class="space-y-1">
+          <div class="flex items-center gap-1.5 text-purple-400 font-bold">
+            <i class="fa-solid fa-database text-xs"></i> GlobalCleanEnergy (AF Database)
+          </div>
+          <div class="pl-4 space-y-1 border-l border-slate-800 mt-1">
+            <div class="flex items-center gap-1.5 text-slate-200">
+              <i class="fa-solid fa-city text-xs text-slate-400"></i> Bighorn Offshore Wind Farm
+            </div>
+            <div class="pl-4 space-y-1 border-l border-slate-800 mt-1">
+              <div class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-folder text-amber-400 text-xs"></i> Feeder Line A</div>
+              <div class="pl-4 space-y-0.5 border-l border-slate-800 text-[11px]">
+                <div class="text-emerald-400 cursor-pointer hover:underline" onclick="selectTurbine(1)">↳ WTG-01 (Template: WindTurbine)</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(2)">↳ WTG-02</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(3)">↳ WTG-03</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(4)">↳ WTG-04</div>
+              </div>
+              <div class="text-slate-400 flex items-center gap-1.5 mt-2"><i class="fa-solid fa-folder text-amber-400 text-xs"></i> Feeder Line B</div>
+              <div class="pl-4 space-y-0.5 border-l border-slate-800 text-[11px]">
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(5)">↳ WTG-05</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(6)">↳ WTG-06</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(7)">↳ WTG-07</div>
+                <div class="text-slate-400 cursor-pointer hover:underline" onclick="selectTurbine(8)">↳ WTG-08</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      renderAfAttributesTable();
+    }
+
+    // AF Attributes Table Rendering
+    function renderAfAttributesTable() {
+      const t = turbines.find(item => item.id === selectedTurbineId) || turbines[0];
+      const tbody = document.getElementById('af-attributes-table-body');
+      const rows = [
+        { name: "Wind_Speed", ref: "PI Point", config: `\\PIDA01\${t.name}.WindSpeed;ptpath=true`, val: t.windSpeed.toFixed(2), uom: "m/s" },
+        { name: "Active_Power", ref: "PI Point", config: `\\PIDA01\${t.name}.ActivePower;ptpath=true`, val: t.activePower.toFixed(0), uom: "kW" },
+        { name: "Rotor_RPM", ref: "PI Point", config: `\\PIDA01\${t.name}.RotorRPM;ptpath=true`, val: t.rotorRpm.toFixed(1), uom: "rpm" },
+        { name: "Nacelle_Yaw", ref: "PI Point", config: `\\PIDA01\${t.name}.NacelleYaw;ptpath=true`, val: `${t.nacelleYaw}`, uom: "deg" },
+        { name: "Gearbox_Bearing_Temp", ref: "PI Point", config: `\\PIDA01\${t.name}.GearboxTemp;ptpath=true`, val: `${t.gearboxTemp}`, uom: "°C" },
+        { name: "Generator_Temp", ref: "PI Point", config: `\\PIDA01\${t.name}.GenTemp;ptpath=true`, val: `${t.genTemp}`, uom: "°C" },
+        { name: "Expected_Power", ref: "Formula", config: `A=Wind_Speed;[0.5*1.225*11310*A^3*0.442/1000]`, val: `${(t.activePower * 1.05).toFixed(0)}`, uom: "kW" },
+        { name: "Power_Loss_Delta", ref: "Formula", config: `A=Expected_Power;B=Active_Power;[A-B]`, val: `${(t.activePower * 0.05).toFixed(0)}`, uom: "kW" }
+      ];
+
+      tbody.innerHTML = rows.map(r => `
+        <tr class="hover:bg-slate-900/50 transition">
+          <td class="py-2 px-3 font-bold text-white">${r.name}</td>
+          <td class="py-2 px-3"><span class="px-2 py-0.5 rounded text-[10px] ${r.ref === 'PI Point' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'}">${r.ref}</span></td>
+          <td class="py-2 px-3 text-slate-400 text-[11px] truncate max-w-xs">${r.config}</td>
+          <td class="py-2 px-3 text-right font-bold text-emerald-400">${r.val}</td>
+          <td class="py-2 px-3 text-slate-500">${r.uom}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Draw Power Curve on Canvas
+    function drawPowerCurve() {
+      const canvas = document.getElementById('power-curve-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Grid lines
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      for (let x = 50; x < w; x += 60) {
+        ctx.beginPath(); ctx.moveTo(x, 20); ctx.lineTo(x, h - 30); ctx.stroke();
+      }
+      for (let y = 30; y < h - 30; y += 40) {
+        ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(w - 20, y); ctx.stroke();
+      }
+
+      // Theoretical Betz Limit (Purple)
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let v = 0; v <= 25; v += 0.5) {
+        const x = 50 + (v / 25) * (w - 70);
+        const pBetz = Math.min(3000, 0.5 * 1.225 * 11310 * Math.pow(v, 3) * 0.593 / 1000);
+        const y = (h - 30) - (pBetz / 3000) * (h - 60);
+        if (v === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Rated OEM Curve (Cyan)
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let v = 0; v <= 25; v += 0.5) {
+        const x = 50 + (v / 25) * (w - 70);
+        let pRated = 0;
+        if (v >= 3 && v < 12) {
+          pRated = Math.pow((v - 3) / 9, 3) * 2500;
+        } else if (v >= 12 && v <= 25) {
+          pRated = 2500;
+        }
+        const y = (h - 30) - (pRated / 3000) * (h - 60);
+        if (v === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Live Point
+      const curTurbine = turbines.find(item => item.id === selectedTurbineId) || turbines[0];
+      const liveX = 50 + (curTurbine.windSpeed / 25) * (w - 70);
+      const liveY = (h - 30) - (curTurbine.activePower / 3000) * (h - 60);
+
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.arc(liveX, liveY, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Labels
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px JetBrains Mono';
+      ctx.fillText('0 m/s', 50, h - 12);
+      ctx.fillText('12 m/s (Rated)', 50 + (12/25)*(w-70) - 30, h - 12);
+      ctx.fillText('25 m/s (Cutout)', w - 80, h - 12);
+      ctx.fillText('2.5 MW', 10, 40);
+      ctx.fillText('0 MW', 15, h - 30);
+    }
+
+    // Render Event Frames
+    function renderEventFrames() {
+      const tbody = document.getElementById('event-frames-tbody');
+      tbody.innerHTML = eventFrames.map(ef => `
+        <tr class="hover:bg-slate-900/50 transition">
+          <td class="py-2.5 px-3 font-bold text-white">${ef.id}</td>
+          <td class="py-2.5 px-3 text-emerald-400 font-bold">${ef.turbine}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">${ef.type}</span></td>
+          <td class="py-2.5 px-3 text-slate-400 text-[11px]">${ef.trigger}</td>
+          <td class="py-2.5 px-3 text-slate-300">${ef.duration}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${ef.severity === 'CRITICAL' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}">${ef.severity}</span></td>
+          <td class="py-2.5 px-3 text-right">
+            <button onclick="ackEvent('${ef.id}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px]">Ack</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function ackEvent(id) {
+      playTone(550);
+      const ef = eventFrames.find(e => e.id === id);
+      if (ef) ef.severity = "ACKNOWLEDGED";
+      renderEventFrames();
+    }
+
+    function clearAcknowledgedEvents() {
+      playTone(440);
+      eventFrames.length = 0;
+      renderEventFrames();
+    }
+
+    // Inspector Drawer
+    function toggleInspectorDrawer() {
+      const drawer = document.getElementById('inspector-drawer');
+      drawer.classList.toggle('translate-x-full');
+      playTone(600);
+    }
+
+    function addInspectorLog(method, endpoint, status, data) {
+      const logs = document.getElementById('inspector-logs');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = "p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5";
+      entry.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${method === 'WSS' ? 'bg-purple-500/20 text-purple-300' : 'bg-emerald-500/20 text-emerald-300'}">${method}</span>
+          <span class="text-[10px] text-slate-500">${time}</span>
+        </div>
+        <div class="text-[11px] text-cyan-400 break-all font-mono">${endpoint}</div>
+        <div class="text-[10px] text-slate-400 bg-slate-950 p-2 rounded border border-slate-900 overflow-x-auto">${JSON.stringify(data, null, 2)}</div>
+      `;
+      logs.prepend(entry);
+      if (logs.children.length > 25) logs.removeChild(logs.lastChild);
+    }
+
+    function clearInspectorLogs() {
+      document.getElementById('inspector-logs').innerHTML = '';
+      playTone(440);
+    }
+
+    // Interactive Controls
+    function onWindSliderChange(val) {
+      ambientWindSpeed = parseFloat(val);
+      document.getElementById('val-wind-slider').innerText = `${ambientWindSpeed.toFixed(1)} m/s`;
+      playTone(400 + ambientWindSpeed * 20);
+    }
+
+    function onDirSliderChange(val) {
+      windDirection = parseInt(val);
+      document.getElementById('val-dir-slider').innerText = `${windDirection}°`;
+    }
+
+    function triggerWindGust() {
+      ambientWindSpeed = Math.min(25, ambientWindSpeed + 7.5);
+      document.getElementById('slider-wind').value = ambientWindSpeed;
+      document.getElementById('val-wind-slider').innerText = `${ambientWindSpeed.toFixed(1)} m/s`;
+      playTone(980, 'sawtooth', 0.25);
+      addInspectorLog('POST', '/piwebapi/eventframes', 201, {
+        Template: "HighWind_Excursion",
+        StartTime: new Date().toISOString(),
+        Severity: "WARNING",
+        WindSpeed_mps: ambientWindSpeed
+      });
+    }
+
+    function simulateYawMisalignment() {
+      const t = turbines[2]; // WTG-03
+      t.nacelleYaw = (windDirection + 28) % 360;
+      t.status = 'WARNING';
+      playTone(720, 'triangle', 0.3);
+      renderTurbinesGrid();
+      addInspectorLog('POST', '/piwebapi/eventframes', 201, {
+        Asset: t.name,
+        Event: "YAW_MISALIGNMENT_EXCURSION",
+        YawError: 28,
+        Severity: "WARNING"
+      });
+    }
+
+    function simulateGearboxOverheat() {
+      const t = turbines[6]; // WTG-07
+      t.gearboxTemp = 88;
+      t.status = 'TRIP';
+      t.activePower = 0;
+      t.rotorRpm = 0;
+      playTone(220, 'square', 0.4);
+      renderTurbinesGrid();
+      renderFocusedTurbineGauges();
+      addInspectorLog('POST', '/piwebapi/eventframes', 201, {
+        Asset: t.name,
+        Event: "GEARBOX_OVERHEAT_TRIP",
+        BearingTemp_C: 88,
+        Action: "Emergency Aerodynamic Brake Deployed"
+      });
+    }
+
+    function resetFleet() {
+      turbines.forEach((t, i) => {
+        t.status = 'NORMAL';
+        t.gearboxTemp = 68;
+        t.nacelleYaw = windDirection;
+        t.activePower = 1850;
+        t.rotorRpm = 14.5;
+      });
+      renderTurbinesGrid();
+      renderFocusedTurbineGauges();
+      playTone(880);
+    }
+
+    function toggleTelemetryStream() {
+      isStreaming = !isStreaming;
+      const btn = document.getElementById('btn-stream');
+      const label = document.getElementById('label-stream');
+      const icon = document.getElementById('icon-stream');
+      if (isStreaming) {
+        btn.className = "px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center gap-1.5 transition";
+        label.innerText = "Streaming (20Hz)";
+        icon.className = "fa-solid fa-play";
+      } else {
+        btn.className = "px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs font-semibold flex items-center gap-1.5 transition";
+        label.innerText = "Paused";
+        icon.className = "fa-solid fa-pause";
+      }
+      playTone(isStreaming ? 880 : 440);
+    }
+
+    // Export CSV
+    function exportTelemetryData(format) {
+      playTone(900);
+      let csv = "Timestamp,Turbine,Feeder,ActivePower_kW,WindSpeed_mps,RotorRPM,NacelleYaw_deg,GearboxTemp_C\n";
+      const now = new Date().toISOString();
+      turbines.forEach(t => {
+        csv += `${now},${t.name},${t.feeder},${t.activePower.toFixed(1)},${t.windSpeed.toFixed(2)},${t.rotorRpm.toFixed(1)},${t.nacelleYaw},${t.gearboxTemp}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WindPulse_Telemetry_${Date.now()}.csv`;
+      a.click();
+    }
+
+    // --- MAIN HIGH-FREQUENCY TELEMETRY SIMULATION LOOP ---
+    let frameCount = 0;
+    setInterval(() => {
+      if (!isStreaming) return;
+      frameCount++;
+
+      let totalPowerKw = 0;
+      turbines.forEach(t => {
+        // Rotor animation
+        t.bladeAngle = (t.bladeAngle + t.rotorRpm * 0.4) % 360;
+
+        if (t.status !== 'TRIP') {
+          // Dynamic wind variation
+          t.windSpeed = Math.max(0, ambientWindSpeed + (Math.sin(frameCount * 0.1 + t.id) * 0.8));
+          
+          // Betz & Rated power model
+          let p = 0;
+          if (t.windSpeed >= 3 && t.windSpeed < 12) {
+            p = Math.pow((t.windSpeed - 3) / 9, 3) * 2500;
+          } else if (t.windSpeed >= 12 && t.windSpeed <= 25) {
+            p = 2500;
+          }
+          t.activePower = p * (1 - Math.abs(t.nacelleYaw - windDirection) * 0.005);
+          t.rotorRpm = t.windSpeed > 3 ? 8 + (t.windSpeed / 12) * 8 : 0;
+        }
+
+        totalPowerKw += t.activePower;
+      });
+
+      // Update Header KPIs
+      document.getElementById('kpi-total-power').innerText = (totalPowerKw / 1000).toFixed(2) + ' MW';
+      document.getElementById('kpi-avg-wind').innerText = ambientWindSpeed.toFixed(1) + ' m/s';
+      document.getElementById('kpi-cap-factor').innerText = ((totalPowerKw / (8 * 2500)) * 100).toFixed(1) + '%';
+
+      // Update focused turbine gauges
+      renderFocusedTurbineGauges();
+
+      // Periodic Inspector WebSocket Sample Injection
+      if (frameCount % 60 === 0) {
+        const cur = turbines[selectedTurbineId - 1];
+        addInspectorLog('WSS', `/piwebapi/channels?webId=${cur.webId}`, 101, {
+          Timestamp: new Date().toISOString(),
+          Items: [
+            { Name: "ActivePower", Value: parseFloat(cur.activePower.toFixed(1)), Units: "kW" },
+            { Name: "WindSpeed", Value: parseFloat(cur.windSpeed.toFixed(2)), Units: "m/s" },
+            { Name: "RotorRPM", Value: parseFloat(cur.rotorRpm.toFixed(1)), Units: "rpm" }
+          ]
+        });
+      }
+
+      // Redraw canvas if active
+      if (!document.getElementById('view-power-curve').classList.contains('hidden')) {
+        drawPowerCurve();
+      }
+    }, 150);
+
+    // Initial boot
+    renderTurbinesGrid();
+    renderFocusedTurbineGauges();
+    window.addEventListener('resize', drawPowerCurve);
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "name": "windpulse",
+  "version": "1.0.0",
+  "description": "Renewable Wind & Solar Farm Fleet Telemetry via AVEVA OSIsoft PI Web API",
+  "scripts": {
+    "start": "python src/main.py"
+  }
+}

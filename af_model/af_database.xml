@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AF xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0" PISystem="PISYSTEM01" Database="GlobalCleanEnergy">
+  <AFDatabase Name="GlobalCleanEnergy">
+    <Description>AVEVA OSIsoft PI Asset Framework Database for Offshore Wind Fleet</Description>
+    <ElementTemplate Name="WindTurbine_Template">
+      <AttributeTemplate Name="Wind_Speed" Type="Single" DefaultUOM="m/s">
+        <DataReference>PI Point</DataReference>
+        <ConfigString>\\PIDA01\%Element%.WindSpeed;ptpath=true</ConfigString>
+      </AttributeTemplate>
+      <AttributeTemplate Name="Active_Power" Type="Single" DefaultUOM="kW">
+        <DataReference>PI Point</DataReference>
+        <ConfigString>\\PIDA01\%Element%.ActivePower;ptpath=true</ConfigString>
+      </AttributeTemplate>
+      <AttributeTemplate Name="Rotor_RPM" Type="Single" DefaultUOM="rpm">
+        <DataReference>PI Point</DataReference>
+        <ConfigString>\\PIDA01\%Element%.RotorRPM;ptpath=true</ConfigString>
+      </AttributeTemplate>
+      <AttributeTemplate Name="Nacelle_Yaw" Type="Single" DefaultUOM="degree">
+        <DataReference>PI Point</DataReference>
+        <ConfigString>\\PIDA01\%Element%.NacelleYaw;ptpath=true</ConfigString>
+      </AttributeTemplate>
+      <AttributeTemplate Name="Gearbox_Bearing_Temp" Type="Single" DefaultUOM="°C">
+        <DataReference>PI Point</DataReference>
+        <ConfigString>\\PIDA01\%Element%.GearboxTemp;ptpath=true</ConfigString>
+      </AttributeTemplate>
+      <AttributeTemplate Name="Power_Loss_Delta" Type="Single" DefaultUOM="kW">
+        <DataReference>Formula</DataReference>
+        <ConfigString>A=Expected_Power;B=Active_Power;[A-B]</ConfigString>
+      </AttributeTemplate>
+    </ElementTemplate>
+
+    <Element Name="Bighorn Offshore Wind Farm">
+      <Element Name="Feeder A">
+        <Element Name="WTG-01" Template="WindTurbine_Template" />
+        <Element Name="WTG-02" Template="WindTurbine_Template" />
+        <Element Name="WTG-03" Template="WindTurbine_Template" />
+        <Element Name="WTG-04" Template="WindTurbine_Template" />
+      </Element>
+      <Element Name="Feeder B">
+        <Element Name="WTG-05" Template="WindTurbine_Template" />
+        <Element Name="WTG-06" Template="WindTurbine_Template" />
+        <Element Name="WTG-07" Template="WindTurbine_Template" />
+        <Element Name="WTG-08" Template="WindTurbine_Template" />
+      </Element>
+    </Element>
+  </AFDatabase>
+</AF>
