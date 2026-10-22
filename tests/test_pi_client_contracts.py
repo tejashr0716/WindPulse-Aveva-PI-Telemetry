@@ -71,6 +71,49 @@ def test_pi_stream_value_quality_flags_bad_string():
     assert sv.Good is False
     assert sv.get_numeric_value() is None
 
+def test_pi_stream_value_strictly_rejects_boolean_values():
+    """
+    Regression Test for Audit Issue E.2:
+    Strictly reject Python boolean True/False as numeric 1.0/0.0 (prevents isinstance(True, int) trap).
+    """
+    sv_true = PIStreamValue(Timestamp="2026-10-22T14:30:00Z", Value=True, Good=True)
+    assert sv_true.get_numeric_value() is None, "Boolean True was incorrectly coerced to numeric 1.0!"
+
+    sv_false = PIStreamValue(Timestamp="2026-10-22T14:30:00Z", Value=False, Good=True)
+    assert sv_false.get_numeric_value() is None, "Boolean False was incorrectly coerced to numeric 0.0!"
+
+def test_pi_stream_value_strictly_rejects_questionable_accuracy():
+    """
+    Regression Test for Audit Issue E.2:
+    Values with Questionable=True must not be treated as valid numeric readings.
+    """
+    sv = PIStreamValue(Timestamp="2026-10-22T14:30:00Z", Value=1850.5, Good=True, Questionable=True)
+    assert sv.get_numeric_value() is None, "Questionable measurement was incorrectly treated as valid!"
+
+def test_pi_stream_value_rejects_nan_and_inf():
+    """NaN and Infinity values must be rejected."""
+    import math
+    sv_nan = PIStreamValue(Timestamp="2026-10-22T14:30:00Z", Value=float("nan"), Good=True)
+    assert sv_nan.get_numeric_value() is None
+
+    sv_inf = PIStreamValue(Timestamp="2026-10-22T14:30:00Z", Value=float("inf"), Good=True)
+    assert sv_inf.get_numeric_value() is None
+
+@pytest.mark.asyncio
+async def test_webid_cache_reuse_contract():
+    """
+    Regression Test for Audit Issue E.3:
+    Re-uses cached WebID to prevent repeated network discovery for static paths.
+    """
+    client = AvevaPIWebApiClient(base_url="https://mock-pi/piwebapi")
+    client.webid_cache["\\\\PISRV01\\WindTurbines"] = "CACHED_WEBID_123"
+
+    with patch.object(client, "_execute_with_retry") as mock_exec:
+        res = await client.get_database_by_path("\\\\PISRV01\\WindTurbines")
+        assert res["WebId"] == "CACHED_WEBID_123"
+        assert res["Cached"] is True
+        mock_exec.assert_not_called()
+
 @pytest.mark.asyncio
 async def test_get_stream_value_contract():
     """Mock test verifying GET /streams/{webId}/value deserialization."""

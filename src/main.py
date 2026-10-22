@@ -52,13 +52,20 @@ async def lifespan(app: FastAPI):
     await telemetry_service.shutdown()
 
 async def telemetry_broadcast_loop():
-    """Streams continuous telemetry snapshots to connected WebSocket clients."""
+    """Streams continuous telemetry snapshots with sequence tracking to connected WebSocket clients."""
     interval = 1.0 / max(1.0, min(60.0, settings.TELEMETRY_INTERVAL_HZ))
+    frame_seq = 0
     while True:
         try:
             if active_connections:
                 snapshot = await telemetry_service.get_current_snapshot()
-                payload = snapshot.model_dump_json()
+                frame_seq += 1
+                payload_dict = snapshot.model_dump()
+                payload_dict["frame_type"] = "STREAM_FRAME"
+                payload_dict["frame_seq"] = frame_seq
+                payload_dict["producer_ts"] = asyncio.get_event_loop().time()
+                payload = json.dumps(payload_dict)
+
                 disconnected = []
                 for ws in active_connections:
                     try:
@@ -94,11 +101,22 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
+    is_live_mode = (settings.RUN_MODE == "REAL_PI")
+    liveness = True
+    readiness = bool(
+        (telemetry_service.pi_client is not None and telemetry_service.initialized)
+        if is_live_mode else
+        telemetry_service.initialized
+    )
+    status_str = "healthy" if (liveness and readiness) else "degraded"
+
     return {
-        "status": "healthy",
+        "status": status_str,
+        "liveness": liveness,
+        "readiness": readiness,
         "run_mode": settings.RUN_MODE,
-        "is_simulated": (settings.RUN_MODE == "SIMULATION"),
-        "disclaimer": "SIMULATED DATA — NOT CONNECTED TO PI" if settings.RUN_MODE == "SIMULATION" else "CONNECTED TO PRODUCTION PI",
+        "is_simulated": not is_live_mode,
+        "disclaimer": "SIMULATED DATA — NOT CONNECTED TO PI" if not is_live_mode else "CONNECTED TO PRODUCTION PI",
         "active_ws_connections": len(active_connections),
         "telemetry_hz": settings.TELEMETRY_INTERVAL_HZ
     }
@@ -201,10 +219,13 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
     active_connections.append(websocket)
     logger.info(f"WebSocket client connected. Active connections: {len(active_connections)}")
     try:
-        # Send initial snapshot immediately upon connect
+        # Send initial snapshot immediately upon connect (labeled as INITIAL_SNAPSHOT)
         initial_snap = await telemetry_service.get_current_snapshot()
-        await websocket.send_text(initial_snap.model_dump_json())
-        
+        init_data = initial_snap.model_dump()
+        init_data["frame_type"] = "INITIAL_SNAPSHOT"
+        init_data["frame_seq"] = 0
+        await websocket.send_text(json.dumps(init_data))
+
         while True:
             # Handle client commands if sent
             data = await websocket.receive_text()

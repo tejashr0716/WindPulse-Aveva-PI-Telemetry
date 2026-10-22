@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Whitelist of specific PI Point WebIDs or tag names permitted for write testing."
     )
+    PI_WRITE_VERIFY_TOLERANCE: float = Field(
+        default=0.05,
+        description="Permissible divergence tolerance between written value and verified read-back value."
+    )
 
     # Telemetry and Simulation Parameters
     TELEMETRY_INTERVAL_HZ: float = Field(default=10.0, description="WebSocket streaming frequency in Hz")

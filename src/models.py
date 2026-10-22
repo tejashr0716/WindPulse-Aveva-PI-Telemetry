@@ -5,6 +5,7 @@ and models for simulated turbine telemetry.
 """
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
@@ -28,17 +29,40 @@ class PIStreamValue(BaseModel):
 
     def get_numeric_value(self) -> Optional[float]:
         """
-        Safely extracts numeric value. Returns None if the value is bad or a system state.
-        Never treats failed or questionable values as valid readings.
+        Safely extracts numeric value.
+        Strict quality guards:
+        1. Returns None if Good is False or Questionable is True.
+        2. Strictly rejects Python boolean True/False (avoids the isinstance(True, int) trap).
+        3. Strictly rejects AVEVA PI Digital State dictionaries (e.g. {'Name': 'Scan Off', 'Value': 248}).
+        4. Strictly rejects non-numeric or NaN/Inf strings and values.
         """
-        if not self.Good:
+        if not self.Good or self.Questionable:
             return None
+
+        # Guard against isinstance(True, int) Python trap
+        if isinstance(self.Value, bool):
+            return None
+
+        # Digital state objects from PI Web API
+        if isinstance(self.Value, dict):
+            return None
+
         if isinstance(self.Value, (int, float)):
-            return float(self.Value)
-        try:
-            return float(self.Value)
-        except (ValueError, TypeError):
-            return None
+            val = float(self.Value)
+            if math.isnan(val) or math.isinf(val):
+                return None
+            return val
+
+        if isinstance(self.Value, str):
+            try:
+                val = float(self.Value)
+                if math.isnan(val) or math.isinf(val):
+                    return None
+                return val
+            except (ValueError, TypeError):
+                return None
+
+        return None
 
 class PIPointWriteRequest(BaseModel):
     web_id: str = Field(..., description="WebID of the target PI Point or Attribute")
@@ -94,6 +118,7 @@ class EventFrameRecord(BaseModel):
     duration_seconds: float
     severity: Literal["INFO", "WARNING", "CRITICAL"]
     acknowledged: bool = False
+    is_simulated: bool = True
 
 class TelemetrySnapshot(BaseModel):
     summary: FleetSummary

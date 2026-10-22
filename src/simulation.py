@@ -5,6 +5,7 @@ and automated Event Frame generation.
 All output is explicitly marked as simulated data.
 """
 
+import logging
 import math
 import random
 import time
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from src.config import settings
 from src.models import EventFrameRecord, FleetSummary, TelemetrySnapshot, TurbineTelemetry
+
+logger = logging.getLogger("windpulse.simulation")
 
 class TurbineSimulationEngine:
     def __init__(self, count: int = 8):
@@ -93,6 +96,7 @@ class TurbineSimulationEngine:
     def _record_event_frame(self, turbine_id: int, turbine_name: str, event_type: str, trigger: str, severity: str):
         ef_id = f"EF-{int(time.time() * 1000) % 100000:05d}"
         now_str = datetime.now(timezone.utc).isoformat()
+        logger.info(f"[SIMULATED EVENT FRAME] {event_type} on {turbine_name}: {trigger}")
         self.event_frames.insert(0, EventFrameRecord(
             id=ef_id,
             turbine_id=turbine_id,
@@ -102,7 +106,8 @@ class TurbineSimulationEngine:
             start_time=now_str,
             duration_seconds=0.0,
             severity=severity,
-            acknowledged=False
+            acknowledged=False,
+            is_simulated=True
         ))
         if len(self.event_frames) > 20:
             self.event_frames = self.event_frames[:20]

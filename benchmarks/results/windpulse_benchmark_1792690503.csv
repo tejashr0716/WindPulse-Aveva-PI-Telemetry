@@ -1,0 +1,3 @@
+Benchmark,Clients/Requests,Initial Snapshots,Stream Frames Delivered,Throughput,P50_ms,P95_ms,P99_ms
+WEBSOCKET_NETWORK_TELEMETRY,20,20,1000,194.9 frames/s,102.841,104.429,104.728
+HTTP_REST_ROUND_TRIP,200,N/A,200,509.6 req/s,16.336,31.923,37.059
