@@ -935,20 +935,55 @@
       playTone(isStreaming ? 880 : 440);
     }
 
+    function escapeCsvField(val) {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    }
+
+    function formatCsvNumeric(val, decimals = 1) {
+      if (val === null || val === undefined || val === '') return '';
+      const num = Number(val);
+      if (!Number.isFinite(num)) return '';
+      return num.toFixed(decimals);
+    }
+
+    function generateTelemetryCsv(turbineList, timestamp) {
+      const now = timestamp || new Date().toISOString();
+      let csv = "Timestamp,Turbine,Feeder,ActivePower_kW,WindSpeed_mps,RotorRPM,NacelleYaw_deg,GearboxTemp_C\n";
+      (turbineList || []).forEach(t => {
+        const ap = formatCsvNumeric(t.active_power_kw, 1);
+        const ws = formatCsvNumeric(t.wind_speed_mps, 2);
+        const rpm = formatCsvNumeric(t.rotor_rpm, 1);
+        const yaw = formatCsvNumeric(t.nacelle_yaw_deg, 1);
+        const temp = formatCsvNumeric(t.gearbox_bearing_temp_c, 1);
+        csv += `${escapeCsvField(now)},${escapeCsvField(t.name)},${escapeCsvField(t.feeder)},${ap},${ws},${rpm},${yaw},${temp}\n`;
+      });
+      return csv;
+    }
+
     function exportTelemetryData(format) {
       playTone(900);
-      let csv = "Timestamp,Turbine,Feeder,ActivePower_kW,WindSpeed_mps,RotorRPM,NacelleYaw_deg,GearboxTemp_C\n";
-      const now = new Date().toISOString();
-      turbines.forEach(t => {
-        csv += `${now},${t.name},${t.feeder},${t.active_power_kw.toFixed(1)},${t.wind_speed_mps.toFixed(2)},${t.rotor_rpm.toFixed(1)},${t.nacelle_yaw_deg.toFixed(1)},${t.gearbox_bearing_temp_c.toFixed(1)}\n`;
-      });
+      const csv = generateTelemetryCsv(turbines);
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `WindPulse_Telemetry_${Date.now()}.csv`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+
+    // Expose for browser regression tests and inspection
+    window.escapeCsvField = escapeCsvField;
+    window.formatCsvNumeric = formatCsvNumeric;
+    window.generateTelemetryCsv = generateTelemetryCsv;
+    window.exportTelemetryData = exportTelemetryData;
 
     // Initialize UI and WebSocket
     renderTurbinesGrid();
